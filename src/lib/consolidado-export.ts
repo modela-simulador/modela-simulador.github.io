@@ -26,9 +26,11 @@ import {
   VERDE,
   ZEBRA,
 } from "./integracion-export";
-import { TIERRA_AUDP, VAN_RATE, VAN_RATE_SAN, YEARS, type Linea, type Unidad } from "./consolidado-model";
+import { AUDP_LABEL, TIERRA_AUDP, VAN_RATE, VAN_RATE_SAN, YEARS, type Audp, type Linea, type Unidad } from "./consolidado-model";
 
-const TITULO = "Consolidado por Unidad de Negocio — AUDP Batuco + Colina";
+const TITULO_BASE = "Consolidado por Unidad de Negocio";
+/** Título del libro según la AUDP en pantalla. */
+let TITULO = `${TITULO_BASE} — AUDP Batuco + Colina`;
 const NY = YEARS.length; // 20 años → columnas B..U; V = Total
 const COL_TOT = NY + 2;
 const L = (n: number) => String.fromCharCode(64 + n); // 2→B … 22→V
@@ -59,7 +61,8 @@ export async function construirLibroConsolidado(unidades: Unidad[]): Promise<Wor
   return wb;
 }
 
-export async function descargarConsolidado(unidades: Unidad[]) {
+export async function descargarConsolidado(unidades: Unidad[], audp: Audp = "ambos") {
+  TITULO = `${TITULO_BASE} — ${AUDP_LABEL[audp]}`;
   const wb = await construirLibroConsolidado(unidades);
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], {
@@ -68,7 +71,8 @@ export async function descargarConsolidado(unidades: Unidad[]) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `consolidado-unidades-negocio-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  const sufijo = audp === "ambos" ? "" : `-${audp}`;
+  a.download = `consolidado-unidades-negocio${sufijo}-${new Date().toISOString().slice(0, 10)}.xlsx`;
   a.click();
   URL.revokeObjectURL(url);
 }

@@ -80,6 +80,68 @@ const AN_S = {
   factibGastada: serie({ 2026: -42899 }),
 };
 
+// ── APERTURA POR AUDP ────────────────────────────────────────
+// Series del propio simulador en modo Solo AUDP (`_peData`: haByZ, recByZ,
+// ingByZ, infraZ, mitigZ). Las hectáreas calzan con las constantes del
+// proyecto: Batuco 16,51 ha y Colina 23,47 ha. Las viviendas son las
+// recepciones corridas 2 años (LAG del simulador), o sea las VENDIDAS
+// con el lote: 1.906 Batuco + 2.444 Colina = 4.350.
+const HA_B = [0, 0, 0, 1.329, 1.329, 1.329, 1.28, 1.919, 2.027, 2.005, 1.364, 0.926, 0.798, 0.739, 0.748, 0.714, 0, 0, 0, 0];
+const HA_C = [0, 0, 0, 2.244, 2.244, 2.329, 2.146, 3.219, 3.373, 1.869, 1.057, 1.172, 1.202, 1.261, 1.252, 0.099, 0, 0, 0, 0];
+const VIV_B = [0, 0, 0, 152, 152, 152, 148, 222, 230, 211, 133, 120, 120, 114, 104, 48, 0, 0, 0, 0];
+const VIV_C = [0, 0, 0, 184, 184, 184, 174, 261, 270, 204, 167, 180, 180, 186, 196, 74, 0, 0, 0, 0];
+const ING_B = [0, 0, 0, 61678, 62912, 64170, 65214, 105915, 148903, 213549, 124641, 98629, 100602, 94725, 84034, 82914, 84572, 31906, 0, 0];
+const ING_C = [0, 0, 0, 78198, 79762, 84686, 84977, 130014, 190024, 163336, 135138, 137841, 140598, 144494, 148501, 117645, 4324, 0, 0, 0];
+const INFRA_B = [0, 0, 0, 0, 38683, 33967, 28713, 37819, 45174, 33061, 13438, 7497, 6583, 5299, 4018, 3389, 2976, 967, 0, 0];
+const INFRA_C = [0, 0, 0, 0, 50774, 46287, 37452, 49329, 58451, 16230, 9959, 8745, 7679, 6743, 5921, 4008, 127, 0, 0, 0];
+const MITIG_B = [0, 0, 0, 0, 30809, 18262, 9131, 0, 9219, 23355, 7400, 5275, 2850, 2400, 2400, 2200, 1900, 1825, 0, 0];
+const MITIG_C = [0, 0, 0, 0, 5000, 5000, 0, 5000, 9350, 6525, 8700, 5100, 3600, 3600, 3600, 3600, 3600, 2775, 0, 0];
+
+export type Audp = "ambos" | "batuco" | "colina";
+
+/** Hectáreas totales por AUDP (DISTRICTS de constants.ts; las series anuales
+ *  redondean a 3 decimales y pierden 0,006 ha al sumarse). */
+export const HA_TOTAL = { batuco: 16.51, colina: 23.47 } as const;
+export const HA_TOTAL_DE: Record<Audp, number> = {
+  batuco: HA_TOTAL.batuco,
+  colina: HA_TOTAL.colina,
+  ambos: HA_TOTAL.batuco + HA_TOTAL.colina,
+};
+
+export const AUDP_LABEL: Record<Audp, string> = {
+  ambos: "AUDP Batuco + Colina",
+  batuco: "AUDP Batuco",
+  colina: "AUDP Colina",
+};
+
+export const HECTAREAS: Record<Audp, number[]> = {
+  batuco: HA_B,
+  colina: HA_C,
+  ambos: addv(HA_B, HA_C),
+};
+export const VIVIENDAS: Record<Audp, number[]> = {
+  batuco: VIV_B,
+  colina: VIV_C,
+  ambos: addv(VIV_B, VIV_C),
+};
+
+/**
+ * Reparte una serie entre las dos AUDP usando una clave año a año. Donde la
+ * clave no tiene masa ese año (p. ej. un costo que corre en años sin venta),
+ * cae a la proporción del total de la clave, para no perder ni inventar UF.
+ */
+function repartir(serie: number[], claveB: number[], claveC: number[], audp: Audp): number[] {
+  if (audp === "ambos") return serie.slice();
+  const totB = suma(claveB), totC = suma(claveC);
+  const fallback = totB + totC > 0 ? (audp === "batuco" ? totB / (totB + totC) : totC / (totB + totC)) : 0.5;
+  return serie.map((v, i) => {
+    const b = claveB[i], c = claveC[i];
+    const den = b + c;
+    const f = Math.abs(den) > 1e-9 ? (audp === "batuco" ? b / den : c / den) : fallback;
+    return v * f;
+  });
+}
+
 export const TIERRA_AUDP = 343000; // AUDP_TIERRA_TOTAL del simulador
 const COMISION = 0.02;
 export const VAN_RATE = 0.08;
@@ -151,24 +213,54 @@ function permanentesDe(flujo: number[]): number {
   return last >= 0 && last + 1 < NY ? YEARS[last + 1] : YEARS[0];
 }
 
-export function computeConsolidado(): { tierra: Unidad; sanitaria: Unidad; consolidado: Unidad } {
+export function computeConsolidado(audp: Audp = "ambos"): { tierra: Unidad; sanitaria: Unidad; consolidado: Unidad } {
+  // Claves de reparto por AUDP (ver Criterios en la página):
+  //  ingresos y equipamiento → venta de cada AUDP · infraestructura y
+  //  mitigaciones → su propia serie por zona · mantención → hectáreas
+  //  acumuladas (el verde que ya hay que mantener) · inversiones y negocio
+  //  sanitario → viviendas · factibilización → su apertura de planilla.
+  const rep = (x: number[], kb: number[], kc: number[]) => repartir(x, kb, kc, audp);
+  const HA_ACUM_B = acum(HA_B), HA_ACUM_C = acum(HA_C);
+
   // ── unidad TIERRA ──
-  const ingTierra = fusion(SEM.ingresos, AN_T.ingresos);
-  const infra = fusion(SEM.infra, AN_T.infra);
-  const mitig = fusion(SEM.mitigaciones, AN_T.mitigaciones);
-  const mant = fusion(SEM.mantencion, AN_T.mantencion);
-  const sanInv = fusion(SEM.sanitariaInv, AN_T.sanitariaInv);
+  const ingTierra = rep(fusion(SEM.ingresos, AN_T.ingresos), ING_B, ING_C);
+  const infra = rep(fusion(SEM.infra, AN_T.infra), INFRA_B, INFRA_C);
+  const mitig = rep(fusion(SEM.mitigaciones, AN_T.mitigaciones), MITIG_B, MITIG_C);
+  const mant = rep(fusion(SEM.mantencion, AN_T.mantencion), HA_ACUM_B, HA_ACUM_C);
+  const sanInv = rep(fusion(SEM.sanitariaInv, AN_T.sanitariaInv), VIV_B, VIV_C);
   const comercializacion = ingTierra.map((v) => -COMISION * v);
-  const equip = SEM.equipamiento;
+  const equip = rep(SEM.equipamiento, ING_B, ING_C);
 
   // COPEC es la venta de un terreno aparte: línea propia, fuera del devengo de tierra
-  const copec = serie({ 2030: 30000 });
+  const copec = rep(serie({ 2030: 30000 }), ING_B, ING_C);
   const ingSinCopec = addv(ingTierra, copec.map((v) => -v));
-  const baseTierra = suma(ingSinCopec);
-  const tierraDev = ingSinCopec.map((v) => (-TIERRA_AUDP * v) / baseTierra);
+  // serie total (sin filtrar) para devengar la tierra de cada AUDP
+  const ingSinCopecTotal = addv(
+    fusion(SEM.ingresos, AN_T.ingresos),
+    serie({ 2030: 30000 }).map((v) => -v),
+  );
+  // La tierra se reparte por hectáreas, igual que tierraByZone del simulador:
+  // Batuco 141.644 UF (41,30%) y Colina 201.356 UF (58,70%) = 343.000. Cada
+  // AUDP devenga la suya contra sus propias ventas, así que el consolidado es
+  // la suma de ambos devengos y las vistas son exactamente aditivas.
+  const haB = HA_TOTAL.batuco, haC = HA_TOTAL.colina;
+  const devengo = (monto: number, clave: number[]) => {
+    const base = suma(clave);
+    return base > 0 ? clave.map((v) => (-monto * v) / base) : clave.map(() => 0);
+  };
+  const ingSinCopecB = repartir(ingSinCopecTotal, ING_B, ING_C, "batuco");
+  const ingSinCopecC = repartir(ingSinCopecTotal, ING_B, ING_C, "colina");
+  const tierraDevB = devengo((TIERRA_AUDP * haB) / (haB + haC), ingSinCopecB);
+  const tierraDevC = devengo((TIERRA_AUDP * haC) / (haB + haC), ingSinCopecC);
+  const tierraDev =
+    audp === "batuco" ? tierraDevB : audp === "colina" ? tierraDevC : addv(tierraDevB, tierraDevC);
 
-  const tFlujo = addv(ingTierra, infra, mitig, comercializacion, mant, equip, sanInv, AN_T.factibPorGastar);
-  const tRes = addv(tFlujo, AN_T.factibGastada);
+  // la factibilización ya viene abierta por AUDP en la planilla
+  const factPG_T = audp === "batuco" ? FACTIB_T_BATUCO : audp === "colina" ? FACTIB_T_COLINA : AN_T.factibPorGastar;
+  const factG_T = rep(AN_T.factibGastada, FACTIB_T_BATUCO, FACTIB_T_COLINA);
+
+  const tFlujo = addv(ingTierra, infra, mitig, comercializacion, mant, equip, sanInv, factPG_T);
+  const tRes = addv(tFlujo, factG_T);
   const tVanFlow = addv(tFlujo, tierraDev);
   const tResAcum = acum(tRes);
 
@@ -188,14 +280,17 @@ export function computeConsolidado(): { tierra: Unidad; sanitaria: Unidad; conso
       { label: "Inversiones Sanitarias (asumidas)", arr: sanInv, total: suma(sanInv) },
       {
         label: "Factibilización por gastar",
-        arr: AN_T.factibPorGastar,
-        total: suma(AN_T.factibPorGastar),
-        detalle: [
-          { label: "AUDP Batuco", arr: FACTIB_T_BATUCO, total: suma(FACTIB_T_BATUCO) },
-          { label: "AUDP Colina", arr: FACTIB_T_COLINA, total: suma(FACTIB_T_COLINA) },
-        ],
+        arr: factPG_T,
+        total: suma(factPG_T),
+        detalle:
+          audp === "ambos"
+            ? [
+                { label: "AUDP Batuco", arr: FACTIB_T_BATUCO, total: suma(FACTIB_T_BATUCO) },
+                { label: "AUDP Colina", arr: FACTIB_T_COLINA, total: suma(FACTIB_T_COLINA) },
+              ]
+            : undefined,
       },
-      { label: "Factibilización gastada (al 2026)", arr: AN_T.factibGastada, total: suma(AN_T.factibGastada) },
+      { label: "Factibilización gastada (al 2026)", arr: factG_T, total: suma(factG_T) },
       { label: "Costo de la Tierra (aporte, devengado)", arr: tierraDev, total: suma(tierraDev) },
     ],
     flujo: tFlujo,
@@ -204,20 +299,27 @@ export function computeConsolidado(): { tierra: Unidad; sanitaria: Unidad; conso
     flujoVan: tVanFlow,
     van: npvAt(tVanFlow, VAN_RATE),
     // la TIR corre desde hoy e incluye la factibilización gastada
-    tir: tirDe(addv(tVanFlow, AN_T.factibGastada)),
+    tir: tirDe(addv(tVanFlow, factG_T)),
     capitalTrabajo: Math.abs(Math.min(...tResAcum, 0)),
     payback: paybackDe(tResAcum),
     flujosPermanentes: permanentesDe(tRes),
     totalIngresos: suma(ingTierra),
-    totalCostos: suma(addv(infra, mitig, comercializacion, mant, equip, sanInv, AN_T.factibPorGastar, AN_T.factibGastada)),
+    totalCostos: suma(addv(infra, mitig, comercializacion, mant, equip, sanInv, factPG_T, factG_T)),
     totalResultado: suma(tRes),
   };
 
   // ── unidad SANITARIA ──
+  // la sanitaria sirve a las viviendas: ésa es su clave de reparto
+  const sIngOp = rep(AN_S.ingOp, VIV_B, VIV_C);
+  const sCostOp = rep(AN_S.costOp, VIV_B, VIV_C);
+  const sVenta = rep(AN_S.venta, VIV_B, VIV_C);
+  const sFactPG = rep(AN_S.factibPorGastar, VIV_B, VIV_C);
+  const sFactG = rep(AN_S.factibGastada, VIV_B, VIV_C);
+
   const sInv = sanInv.slice();
   const sPagoDev = sanInv.map((v) => -v);
-  const sFlujo = addv(AN_S.ingOp, AN_S.costOp, sInv, sPagoDev, AN_S.venta, AN_S.factibPorGastar);
-  const sRes = addv(sFlujo, AN_S.factibGastada);
+  const sFlujo = addv(sIngOp, sCostOp, sInv, sPagoDev, sVenta, sFactPG);
+  const sRes = addv(sFlujo, sFactG);
   const sResAcum = acum(sRes);
   const sFlujoAcum = acum(sFlujo);
 
@@ -225,15 +327,15 @@ export function computeConsolidado(): { tierra: Unidad; sanitaria: Unidad; conso
     id: "sanitaria",
     nombre: "Sanitaria",
     ingresos: [
-      { label: "Ingresos Operacionales", arr: AN_S.ingOp, total: suma(AN_S.ingOp) },
+      { label: "Ingresos Operacionales", arr: sIngOp, total: suma(sIngOp) },
       { label: "Pago Desarrollador (neteo inversiones)", arr: sPagoDev, total: suma(sPagoDev) },
-      { label: "Venta Negocio Sanitario (2045)", arr: AN_S.venta, total: suma(AN_S.venta) },
+      { label: "Venta Negocio Sanitario (2045)", arr: sVenta, total: suma(sVenta) },
     ],
     costos: [
-      { label: "Costos Operacionales", arr: AN_S.costOp, total: suma(AN_S.costOp) },
+      { label: "Costos Operacionales", arr: sCostOp, total: suma(sCostOp) },
       { label: "Inversiones Sanitarias", arr: sInv, total: suma(sInv) },
-      { label: "Factibilización por gastar", arr: AN_S.factibPorGastar, total: suma(AN_S.factibPorGastar) },
-      { label: "Factibilización gastada (al 2026)", arr: AN_S.factibGastada, total: suma(AN_S.factibGastada) },
+      { label: "Factibilización por gastar", arr: sFactPG, total: suma(sFactPG) },
+      { label: "Factibilización gastada (al 2026)", arr: sFactG, total: suma(sFactG) },
     ],
     flujo: sFlujo,
     resultado: sRes,
@@ -245,8 +347,8 @@ export function computeConsolidado(): { tierra: Unidad; sanitaria: Unidad; conso
     capitalTrabajo: Math.abs(Math.min(...sFlujoAcum, 0)),
     payback: paybackDe(sResAcum),
     flujosPermanentes: permanentesDe(sRes),
-    totalIngresos: suma(addv(AN_S.ingOp, sPagoDev, AN_S.venta)),
-    totalCostos: suma(addv(AN_S.costOp, sInv, AN_S.factibPorGastar, AN_S.factibGastada)),
+    totalIngresos: suma(addv(sIngOp, sPagoDev, sVenta)),
+    totalCostos: suma(addv(sCostOp, sInv, sFactPG, sFactG)),
     totalResultado: suma(sRes),
   };
 
@@ -265,20 +367,20 @@ export function computeConsolidado(): { tierra: Unidad; sanitaria: Unidad; conso
       ...sanitaria.costos.filter((c) => !c.label.startsWith("Factibilización")),
       {
         label: "Factibilización por gastar",
-        arr: addv(AN_T.factibPorGastar, AN_S.factibPorGastar),
-        total: suma(AN_T.factibPorGastar) + suma(AN_S.factibPorGastar),
+        arr: addv(factPG_T, sFactPG),
+        total: suma(factPG_T) + suma(sFactPG),
         detalle: [
-          { label: "Tierra", arr: AN_T.factibPorGastar, total: suma(AN_T.factibPorGastar) },
-          { label: "Sanitaria", arr: AN_S.factibPorGastar, total: suma(AN_S.factibPorGastar) },
+          { label: "Tierra", arr: factPG_T, total: suma(factPG_T) },
+          { label: "Sanitaria", arr: sFactPG, total: suma(sFactPG) },
         ],
       },
       {
         label: "Factibilización gastada (al 2026)",
-        arr: addv(AN_T.factibGastada, AN_S.factibGastada),
-        total: suma(AN_T.factibGastada) + suma(AN_S.factibGastada),
+        arr: addv(factG_T, sFactG),
+        total: suma(factG_T) + suma(sFactG),
         detalle: [
-          { label: "Tierra", arr: AN_T.factibGastada, total: suma(AN_T.factibGastada) },
-          { label: "Sanitaria", arr: AN_S.factibGastada, total: suma(AN_S.factibGastada) },
+          { label: "Tierra", arr: factG_T, total: suma(factG_T) },
+          { label: "Sanitaria", arr: sFactG, total: suma(sFactG) },
         ],
       },
       tierra.costos.find((c) => c.label.startsWith("Costo de la Tierra"))!,
@@ -289,7 +391,7 @@ export function computeConsolidado(): { tierra: Unidad; sanitaria: Unidad; conso
     flujoVan: cVanFlow,
     // VAN consolidado = suma de los VAN por unidad (tierra al 8%, sanitaria al 7%)
     van: npvAt(tVanFlow, VAN_RATE) + npvAt(sFlujo, VAN_RATE_SAN),
-    tir: tirDe(addv(cVanFlow, AN_T.factibGastada, AN_S.factibGastada)),
+    tir: tirDe(addv(cVanFlow, factG_T, sFactG)),
     capitalTrabajo: Math.abs(Math.min(...cResAcum, 0)),
     payback: paybackDe(cResAcum),
     flujosPermanentes: permanentesDe(cRes),

@@ -4,12 +4,18 @@ import { Fragment, useMemo, useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import { descargarConsolidado } from "@/lib/consolidado-export";
 import {
+  acum,
+  AUDP_LABEL,
+  HA_TOTAL_DE,
   computeConsolidado,
+  HECTAREAS,
   PARIDAD_PLANILLAS,
   TIERRA_AUDP,
   VAN_RATE,
   VAN_RATE_SAN,
+  VIVIENDAS,
   YEARS,
+  type Audp,
   type Unidad,
 } from "@/lib/consolidado-model";
 
@@ -17,16 +23,26 @@ import {
 const nf = (n: number) => Math.round(Math.abs(n)).toLocaleString("es-CL");
 const sg = (n: number) => (n < -0.5 ? "−" : "") + nf(n);
 const uf = (n: number) => `${sg(n)} UF`;
+const tasa = (r: number) => `${(r * 100).toFixed(0)}%`;
 const pct = (n: number | null) => (n === null ? "—" : `${(n * 100).toFixed(1).replace(".", ",")}%`);
+const ha = (n: number) => (Math.abs(n) < 0.0005 ? "·" : n.toFixed(2).replace(".", ","));
+const un = (n: number) => (Math.abs(n) < 0.5 ? "·" : Math.round(n).toLocaleString("es-CL"));
 
 export default function ConsolidadoPage() {
-  const { tierra, sanitaria, consolidado } = useMemo(() => computeConsolidado(), []);
+  const [audp, setAudp] = useState<Audp>("ambos");
+  const { tierra, sanitaria, consolidado } = useMemo(() => computeConsolidado(audp), [audp]);
   const unidades = [tierra, sanitaria, consolidado];
+  const fisico = useMemo(() => {
+    const h = HECTAREAS[audp], v = VIVIENDAS[audp];
+    // el total viene de las constantes del proyecto: la serie anual redondea
+    // a 3 decimales y perdería 0,006 ha al sumarse
+    return { haAnual: h, haAcum: acum(h), vivAnual: v, vivAcum: acum(v), haTot: HA_TOTAL_DE[audp], vivTot: acum(v)[v.length - 1] };
+  }, [audp]);
   const [bajando, setBajando] = useState(false);
   const exportar = async () => {
     setBajando(true);
     try {
-      await descargarConsolidado(unidades);
+      await descargarConsolidado(unidades, audp);
     } finally {
       setBajando(false);
     }
@@ -43,10 +59,24 @@ export default function ConsolidadoPage() {
         <div className="min-w-0">
           <h1 className="text-base font-bold leading-tight">Consolidado por Unidad de Negocio</h1>
           <p className="text-[11px] text-zinc-500 truncate">
-            AUDP Batuco + Colina · flujo anual en UF · {YEARS[0]} – {YEARS[YEARS.length - 1]}
+            {AUDP_LABEL[audp]} · flujo anual en UF · {YEARS[0]} – {YEARS[YEARS.length - 1]}
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          <div className="flex items-center rounded-md border border-zinc-700 overflow-hidden">
+            {(["ambos", "batuco", "colina"] as const).map((k) => (
+              <button
+                key={k}
+                onClick={() => setAudp(k)}
+                title={`Ver ${AUDP_LABEL[k]}`}
+                className={`px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  audp === k ? "bg-zinc-200 text-zinc-900" : "text-zinc-400 hover:text-white"
+                }`}
+              >
+                {k === "ambos" ? "Ambos" : k === "batuco" ? "Batuco" : "Colina"}
+              </button>
+            ))}
+          </div>
           <button
             onClick={exportar}
             disabled={bajando}
@@ -75,10 +105,17 @@ export default function ConsolidadoPage() {
           ))}
         </div>
 
+        <Fisico f={fisico} u={consolidado} audp={audp} />
         <FlujoChart u={consolidado} />
-        <FlujoTable unidades={unidades} />
+        <FlujoTable unidades={unidades} fisico={fisico} />
         <Criterios />
-        <Paridad tierra={tierra} sanitaria={sanitaria} />
+        {audp === "ambos" ? (
+          <Paridad tierra={tierra} sanitaria={sanitaria} />
+        ) : (
+          <p className="text-[11px] text-zinc-500 px-1">
+            El contraste con las planillas del simulador corre sobre el total; vuelve a <span className="text-zinc-300">Ambos</span> para verlo.
+          </p>
+        )}
       </main>
     </div>
   );
@@ -102,7 +139,7 @@ function UnidadCard({ u, destacada }: { u: Unidad; destacada?: boolean }) {
       </div>
       <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
         <Kpi
-          label={u.id === "sanitaria" ? `VAN ${VAN_RATE_SAN * 100}%` : u.id === "consolidado" ? "VAN · T 8% / S 7%" : `VAN ${VAN_RATE * 100}% c/ tierra`}
+          label={u.id === "sanitaria" ? `VAN ${tasa(VAN_RATE_SAN)}` : u.id === "consolidado" ? `VAN · T ${tasa(VAN_RATE)} / S ${tasa(VAN_RATE_SAN)}` : `VAN ${tasa(VAN_RATE)} c/ tierra`}
           value={uf(u.van)}
           color={u.van >= 0 ? "text-green-400" : "text-red-400"}
         />
@@ -125,6 +162,43 @@ function Kpi({ label, value, color }: { label: string; value: string; color: str
     <div>
       <div className="text-[9px] text-zinc-500 uppercase tracking-wider leading-tight">{label}</div>
       <div className={`text-[13px] font-bold tabular-nums ${color}`}>{value}</div>
+    </div>
+  );
+}
+
+interface Fisico {
+  haAnual: number[];
+  haAcum: number[];
+  vivAnual: number[];
+  vivAcum: number[];
+  haTot: number;
+  vivTot: number;
+}
+
+// ── superficie y viviendas vendidas ──────────────────────────
+function Fisico({ f, u, audp }: { f: Fisico; u: Unidad; audp: Audp }) {
+  const ufPorHa = f.haTot > 0 ? u.totalIngresos / f.haTot : 0;
+  const ufPorViv = f.vivTot > 0 ? u.totalIngresos / f.vivTot : 0;
+  const datos: Array<[string, string, string]> = [
+    ["Hectáreas vendidas", ha(f.haTot), AUDP_LABEL[audp]],
+    ["Viviendas vendidas", un(f.vivTot), "con el lote urbanizado"],
+    ["UF por hectárea", nf(ufPorHa), "ingreso medio del suelo"],
+    ["UF por vivienda", nf(ufPorViv), "ingreso medio por unidad"],
+  ];
+  return (
+    <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg p-3.5">
+      <h3 className="text-[11px] uppercase tracking-wider font-semibold text-zinc-400 mb-2.5">
+        Superficie y viviendas vendidas
+      </h3>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {datos.map(([label, valor, sub]) => (
+          <div key={label}>
+            <div className="text-[9px] text-zinc-500 uppercase tracking-wider leading-tight">{label}</div>
+            <div className="text-[17px] font-bold tabular-nums text-zinc-100 leading-tight">{valor}</div>
+            <div className="text-[10px] text-zinc-500 leading-tight mt-0.5">{sub}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -214,7 +288,7 @@ function Legend({ color, label }: { color: string; label: string }) {
 }
 
 // ── tabla anual por unidad de negocio ────────────────────────
-function FlujoTable({ unidades }: { unidades: Unidad[] }) {
+function FlujoTable({ unidades, fisico }: { unidades: Unidad[]; fisico: Fisico }) {
   const cols = YEARS;
   const [abiertas, setAbiertas] = useState<Set<string>>(new Set());
   const toggleFila = (k: string) =>
@@ -250,6 +324,34 @@ function FlujoTable({ unidades }: { unidades: Unidad[] }) {
             </tr>
           </thead>
           <tbody>
+            {/* ── venta física: hectáreas y viviendas ── */}
+            <tr className="bg-[#D9E5DD]">
+              <td colSpan={cols.length + 2} className="px-3 py-1 text-[10px] font-bold text-[#2C4A3B] uppercase tracking-wide sticky left-0 bg-[#D9E5DD]">
+                Venta física
+              </td>
+            </tr>
+            {(
+              [
+                ["Hectáreas vendidas", fisico.haAnual, ha, false],
+                ["Hectáreas acumuladas", fisico.haAcum, ha, true],
+                ["Viviendas vendidas", fisico.vivAnual, un, false],
+                ["Viviendas acumuladas", fisico.vivAcum, un, true],
+              ] as Array<[string, number[], (n: number) => string, boolean]>
+            ).map(([label, arr, fmt, acumulada]) => (
+              <tr key={label} className="border-b border-zinc-800/70 hover:bg-zinc-800/30">
+                <td className={`px-3 py-1 text-left sticky left-0 bg-zinc-950/95 ${acumulada ? "italic text-zinc-500" : "text-zinc-300"}`}>
+                  {label}
+                </td>
+                {arr.map((v, i) => (
+                  <td key={i} className={`px-2 py-1 text-right ${acumulada ? "italic text-zinc-500" : "text-zinc-300"}`}>
+                    {fmt(v)}
+                  </td>
+                ))}
+                <td className={`px-3 py-1 text-right font-semibold ${acumulada ? "italic text-zinc-500" : "text-zinc-200"}`}>
+                  {fmt(acumulada ? arr[arr.length - 1] : arr.reduce((a, b) => a + b, 0))}
+                </td>
+              </tr>
+            ))}
             {unidades.map((u) => {
               const tierraLinea = u.costos.find((c) => c.label.startsWith("Costo de la Tierra"));
               return (
@@ -361,7 +463,7 @@ function Criterios() {
       </p>
       <p>
         <span className="text-zinc-300 font-semibold">Tasas y TIR:</span> la TIR corre desde 2026 e incluye la
-        factibilización gastada. El VAN la excluye (costo hundido): tierra al {VAN_RATE * 100}%, sanitaria al {VAN_RATE_SAN * 100}%,
+        factibilización gastada. El VAN la excluye (costo hundido): tierra al {tasa(VAN_RATE)}, sanitaria al {tasa(VAN_RATE_SAN)},
         y el consolidado suma los VAN por unidad. La etapa 6 de la planta cierra completa en 2041.
       </p>
     </div>
