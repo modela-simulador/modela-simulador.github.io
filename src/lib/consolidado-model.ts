@@ -303,13 +303,12 @@ export function computeConsolidado(audp: Audp = "ambos"): { inmobiliario: Unidad
     audp === "batuco" ? FACTIB_T_BATUCO : audp === "colina" ? FACTIB_T_COLINA : AN_T.factibPorGastar,
     rep(AN_S.factibPorGastar, FACTIB_T_BATUCO, FACTIB_T_COLINA),
   );
-  const factG_T = addv(
-    rep(AN_T.factibGastada, FACTIB_T_BATUCO, FACTIB_T_COLINA),
-    rep(AN_S.factibGastada, FACTIB_T_BATUCO, FACTIB_T_COLINA),
-  );
+  // La factibilización GASTADA no se carga (criterio del Directorio,
+  // 2026-10-05): es costo hundido y ya no entra ni al resultado, ni a la TIR,
+  // ni al capital de trabajo. Solo corre la que queda por gastar.
 
   const tFlujo = addv(ingTierra, infra, mitig, comercializacion, mant, equip, sanInv, factPG_T);
-  const tRes = addv(tFlujo, factG_T);
+  const tRes = tFlujo;
   const tVanFlow = addv(tFlujo, tierraDev);
   const tResAcum = acum(tRes);
 
@@ -339,7 +338,6 @@ export function computeConsolidado(audp: Audp = "ambos"): { inmobiliario: Unidad
               ]
             : undefined,
       },
-      { label: "Factibilización gastada al 2026 (incl. sanitaria)", arr: factG_T, total: suma(factG_T) },
       { label: "Costo de la Tierra (aporte, devengado)", arr: tierraDev, total: suma(tierraDev) },
     ],
     flujo: tFlujo,
@@ -348,12 +346,12 @@ export function computeConsolidado(audp: Audp = "ambos"): { inmobiliario: Unidad
     flujoVan: tVanFlow,
     van: npvAt(tVanFlow, VAN_RATE),
     // la TIR corre desde hoy e incluye la factibilización gastada
-    tir: tirDe(addv(tVanFlow, factG_T)),
+    tir: tirDe(tVanFlow),
     capitalTrabajo: Math.abs(Math.min(...tResAcum, 0)),
     payback: paybackDe(tResAcum),
     flujosPermanentes: permanentesDe(tRes),
     totalIngresos: suma(ingTierra),
-    totalCostos: suma(addv(infra, mitig, comercializacion, mant, equip, sanInv, factPG_T, factG_T)),
+    totalCostos: suma(addv(infra, mitig, comercializacion, mant, equip, sanInv, factPG_T)),
     totalResultado: suma(tRes),
   };
 

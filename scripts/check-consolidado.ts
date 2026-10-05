@@ -43,7 +43,7 @@ chk("Inversiones Sanitarias", tot("Inversiones Sanitarias"), PARIDAD_PLANILLAS.i
 
 console.log("\n── el inmobiliario asume toda la factibilización ──");
 chk("Factibilización por gastar", tot("Factibilización por gastar"), -58923 - 34641 - 24350 - 4909 - 2813 - 1139 - 133 - 11850 - 9099 - 6336 - 892 - 842 - 827 - 779, 2);
-chk("Factibilización gastada", tot("Factibilización gastada"), -132513 - 42899, 2);
+chk("sin factibilización gastada", tot("Factibilización gastada"), 0, 0);
 const etiquetas = [...A.inmobiliario.ingresos, ...A.inmobiliario.costos].map((l) => l.label).join(" | ");
 chk("sin operacionales ni venta sanitaria", /Operacional|Pago Desarrollador|Venta Negocio Sanitario/.test(etiquetas) ? 1 : 0, 0, 0);
 

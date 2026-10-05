@@ -129,7 +129,7 @@ function UnidadCard({ u, destacada }: { u: Unidad; destacada?: boolean }) {
           color={u.van >= 0 ? "text-green-400" : "text-red-400"}
         />
         <Kpi
-          label="TIR c/ tierra (incl. f. gastada)"
+          label="TIR c/ tierra"
           value={pct(u.tir)}
           color={(u.tir ?? 0) >= VAN_RATE ? "text-green-400" : "text-red-400"}
         />
@@ -434,18 +434,17 @@ function Criterios() {
       </p>
       <p>
         <span className="text-zinc-300 font-semibold">Qué se evalúa:</span> solo el negocio inmobiliario. Asume las
-        inversiones sanitarias (318.587 UF) y la factibilización completa, la suya y la de la sanitaria, porque las
-        financia. No toma nada operacional de la sanitaria, ni el pago del desarrollador, ni la venta del negocio
+        inversiones sanitarias (318.587 UF) y la factibilización por gastar completa, la suya y la de la sanitaria,
+        porque las financia. No toma nada operacional de la sanitaria, ni el pago del desarrollador, ni la venta del negocio
         sanitario: el VAN y la TIR de esta lámina son del inmobiliario solo.
       </p>
       <p>
-        <span className="text-zinc-300 font-semibold">Capital de trabajo:</span> el valle del resultado acumulado, que
-        incluye la factibilización ya gastada.
+        <span className="text-zinc-300 font-semibold">Capital de trabajo:</span> el valle del resultado acumulado.
       </p>
       <p>
-        <span className="text-zinc-300 font-semibold">Tasas y TIR:</span> la TIR corre desde 2026 e incluye la
-        factibilización gastada. El VAN la excluye por ser costo hundido y descuenta al {tasa(VAN_RATE)}. La etapa 6 de
-        la planta cierra completa en 2041.
+        <span className="text-zinc-300 font-semibold">Tasas y TIR:</span> la TIR corre desde 2026 y el VAN descuenta al
+        {" "}{tasa(VAN_RATE)}. La factibilización ya gastada no se carga por ser costo hundido: solo corre la que queda
+        por gastar. La etapa 6 de la planta cierra completa en 2041.
       </p>
     </div>
   );
