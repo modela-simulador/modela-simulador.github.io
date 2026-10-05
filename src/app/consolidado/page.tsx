@@ -4,6 +4,7 @@ import { Fragment, useMemo, useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import { descargarConsolidado } from "@/lib/consolidado-export";
 import {
+  ALCANCE_LABEL,
   AUDP_LABEL,
   computeConsolidado,
   PARIDAD_PLANILLAS,
@@ -11,6 +12,7 @@ import {
   TASAS,
   VAN_RATE,
   YEARS,
+  type Alcance,
   type Audp,
   type Fisico,
   type Unidad,
@@ -28,7 +30,11 @@ const un = (n: number) => (Math.abs(n) < 0.5 ? "·" : Math.round(n).toLocaleStri
 export default function ConsolidadoPage() {
   const [audp, setAudp] = useState<Audp>("ambos");
   const [tasa, setTasa] = useState<number>(VAN_RATE);
-  const { inmobiliario, fisico } = useMemo(() => computeConsolidado(audp, tasa), [audp, tasa]);
+  const [alcance, setAlcance] = useState<Alcance>("inmobiliario");
+  const { inmobiliario, fisico } = useMemo(
+    () => computeConsolidado(audp, tasa, alcance),
+    [audp, tasa, alcance],
+  );
   const [bajando, setBajando] = useState(false);
   const exportar = async () => {
     setBajando(true);
@@ -42,18 +48,32 @@ export default function ConsolidadoPage() {
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
       {/* ── header ── */}
-      <header className="sticky top-0 z-20 bg-zinc-950/90 backdrop-blur border-b border-zinc-800 px-5 py-3 flex items-center gap-4">
+      <header className="sticky top-0 z-20 bg-zinc-950/90 backdrop-blur border-b border-zinc-800 px-5 py-3 flex flex-wrap items-center gap-x-4 gap-y-2">
         <a href={`${BASE_PATH}/`} className="text-zinc-500 hover:text-white text-sm transition-colors shrink-0">
           ← Inicio
         </a>
         <div className="h-5 w-px bg-zinc-800" />
-        <div className="min-w-0">
-          <h1 className="text-base font-bold leading-tight">Consolidado — Negocio Inmobiliario</h1>
+        <div className="min-w-0 shrink">
+          <h1 className="text-base font-bold leading-tight">Consolidado — {ALCANCE_LABEL[alcance]}</h1>
           <p className="text-[11px] text-zinc-500 truncate">
-            Negocio inmobiliario · {AUDP_LABEL[audp]} · UF · {YEARS[0]} – {YEARS[YEARS.length - 1]}
+            {ALCANCE_LABEL[alcance]} · {AUDP_LABEL[audp]} · UF · {YEARS[0]} – {YEARS[YEARS.length - 1]}
           </p>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          <div className="flex items-center rounded-md border border-zinc-700 overflow-hidden">
+            {(["inmobiliario", "completo"] as const).map((k) => (
+              <button
+                key={k}
+                onClick={() => setAlcance(k)}
+                title={`Evaluar ${ALCANCE_LABEL[k]}`}
+                className={`px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  alcance === k ? "bg-zinc-200 text-zinc-900" : "text-zinc-400 hover:text-white"
+                }`}
+              >
+                {k === "inmobiliario" ? "Inmobiliario" : "Proyecto completo"}
+              </button>
+            ))}
+          </div>
           <div className="flex items-center rounded-md border border-zinc-700 overflow-hidden">
             {(["ambos", "batuco", "colina"] as const).map((k) => (
               <button
@@ -169,8 +189,13 @@ function Kpi({ label, value, color }: { label: string; value: string; color: str
 
 // ── superficie y viviendas vendidas ──────────────────────────
 function Fisico({ f, u, audp }: { f: Fisico; u: Unidad; audp: Audp }) {
-  const ufPorHa = f.haTot > 0 ? u.totalIngresos / f.haTot : 0;
-  const ufPorViv = f.vivTot > 0 ? u.totalIngresos / f.vivTot : 0;
+  // siempre sobre el ingreso de SUELO: en el proyecto completo el total
+  // arrastra la operación sanitaria y el UF/ha dejaría de significar nada
+  const ingSuelo = u.ingresos
+    .filter((l) => /Venta de Tierra|COPEC/.test(l.label))
+    .reduce((s, l) => s + l.total, 0);
+  const ufPorHa = f.haTot > 0 ? ingSuelo / f.haTot : 0;
+  const ufPorViv = f.vivTot > 0 ? ingSuelo / f.vivTot : 0;
   const datos: Array<[string, string, string]> = [
     ["Hectáreas vendidas", ha(f.haTot), AUDP_LABEL[audp]],
     ["Viviendas vendidas", un(f.vivTot), "con el lote urbanizado"],
@@ -217,7 +242,7 @@ function FlujoChart({ u }: { u: Unidad }) {
     <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg p-3">
       <div className="flex items-center gap-4 mb-1 flex-wrap">
         <h3 className="text-[11px] uppercase tracking-wider font-semibold text-zinc-400">
-          Flujo de caja anual del negocio inmobiliario
+          Flujo de caja anual
         </h3>
         <div className="flex items-center gap-3 text-[10px] text-zinc-500">
           <Legend color="#15803D" label="Flujo positivo" />
@@ -301,7 +326,7 @@ function FlujoTable({ unidades, fisico }: { unidades: Unidad[]; fisico: Fisico }
     <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg overflow-hidden">
       <div className="px-3 py-2 border-b border-zinc-800">
         <h3 className="text-[11px] uppercase tracking-wider font-semibold text-zinc-400">
-          Flujo anual del negocio inmobiliario · UF
+          Flujo anual · UF
         </h3>
       </div>
       <div className="overflow-x-auto">

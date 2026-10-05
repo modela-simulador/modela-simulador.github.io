@@ -57,6 +57,23 @@ const primero = (a: number[]) => YEARS[a.findIndex((v) => v > 0.0005)];
 chk("primer año con hectáreas", primero(A.fisico.haAnual), 2031, 0);
 chk("primer año con viviendas", primero(A.fisico.vivAnual), 2031, 0);
 
+console.log("\n── proyecto completo como una sola unidad ──");
+const K = computeConsolidado("ambos", 0.08, "completo");
+const KB = computeConsolidado("batuco", 0.08, "completo");
+const KC = computeConsolidado("colina", 0.08, "completo");
+chk("resultado del proyecto completo", K.inmobiliario.totalResultado, 1651223, 2);
+chk("Batuco + Colina = Ambos", KB.inmobiliario.totalResultado + KC.inmobiliario.totalResultado, K.inmobiliario.totalResultado, 1);
+chk("VAN aditivo", KB.inmobiliario.van + KC.inmobiliario.van, K.inmobiliario.van, 0.5);
+const etqK = [...K.inmobiliario.ingresos, ...K.inmobiliario.costos].map((l) => l.label).join(" | ");
+chk("trae la operación sanitaria", /Operacionales Sanitarios/.test(etqK) ? 1 : 0, 1, 0);
+chk("trae la venta del sanitario", /Venta Negocio Sanitario/.test(etqK) ? 1 : 0, 1, 0);
+chk("trae la factibilización gastada", /Factibilización gastada/.test(etqK) ? 1 : 0, 1, 0);
+// el pago del desarrollador era una transferencia interna: en una sola unidad no existe
+chk("sin pago del desarrollador", /Pago Desarrollador/.test(etqK) ? 1 : 0, 0, 0);
+const invK = K.inmobiliario.costos.filter((l) => l.label.startsWith("Inversiones Sanitarias"));
+chk("las inversiones sanitarias van una sola vez", invK.length, 1, 0);
+chk("y por su monto real", invK[0]?.total ?? 0, -318587, 2);
+
 console.log("\n── tasa de descuento ──");
 const A7 = computeConsolidado("ambos", 0.07);
 chk("VAN al 8%", A.inmobiliario.van, 433903, 2);

@@ -99,6 +99,14 @@ const MITIG_C = [0, 0, 0, 0, 5000, 5000, 0, 5000, 9350, 6525, 8700, 5100, 3600, 
 
 export type Audp = "ambos" | "batuco" | "colina";
 
+/** Qué se evalúa: solo el negocio inmobiliario, o el proyecto entero como
+ *  una sola unidad de negocio (sanitaria y factibilización gastada dentro). */
+export type Alcance = "inmobiliario" | "completo";
+export const ALCANCE_LABEL: Record<Alcance, string> = {
+  inmobiliario: "Negocio Inmobiliario",
+  completo: "Proyecto Completo",
+};
+
 /** Hectáreas totales por AUDP (DISTRICTS de constants.ts; las series anuales
  *  redondean a 3 decimales y pierden 0,006 ha al sumarse). */
 export const HA_TOTAL = { batuco: 16.51, colina: 23.47 } as const;
@@ -258,7 +266,7 @@ function permanentesDe(flujo: number[]): number {
   return last >= 0 && last + 1 < NY ? YEARS[last + 1] : YEARS[0];
 }
 
-export function computeConsolidado(audp: Audp = "ambos", tasa: number = VAN_RATE): { inmobiliario: Unidad; fisico: Fisico } {
+export function computeConsolidado(audp: Audp = "ambos", tasa: number = VAN_RATE, alcance: Alcance = "inmobiliario"): { inmobiliario: Unidad; fisico: Fisico } {
   // Claves de reparto por AUDP (ver Criterios en la página):
   //  ingresos y equipamiento → venta de cada AUDP · infraestructura y
   //  mitigaciones → su propia serie por zona · mantención → hectáreas
@@ -308,21 +316,41 @@ export function computeConsolidado(audp: Audp = "ambos", tasa: number = VAN_RATE
     audp === "batuco" ? FACTIB_T_BATUCO : audp === "colina" ? FACTIB_T_COLINA : AN_T.factibPorGastar,
     rep(AN_S.factibPorGastar, FACTIB_T_BATUCO, FACTIB_T_COLINA),
   );
-  // La factibilización GASTADA no se carga (criterio del Directorio,
-  // 2026-10-05): es costo hundido y ya no entra ni al resultado, ni a la TIR,
-  // ni al capital de trabajo. Solo corre la que queda por gastar.
+  // La factibilización GASTADA: en el inmobiliario NO se carga (costo hundido,
+  // criterio del Directorio 2026-10-05); en el proyecto completo sí entra.
+  const factG_T = addv(
+    rep(AN_T.factibGastada, FACTIB_T_BATUCO, FACTIB_T_COLINA),
+    rep(AN_S.factibGastada, FACTIB_T_BATUCO, FACTIB_T_COLINA),
+  );
 
-  const tFlujo = addv(ingTierra, infra, mitig, comercializacion, mant, equip, sanInv, factPG_T);
-  const tRes = tFlujo;
+  // ── operación sanitaria: solo pesa en el proyecto completo ──
+  // Como es UNA sola unidad de negocio, el pago del desarrollador desaparece:
+  // era una transferencia interna que neteaba las inversiones. Éstas quedan
+  // una sola vez, que es el desembolso real.
+  const completo = alcance === "completo";
+  const cero = YEARS.map(() => 0);
+  const sIngOp = completo ? rep(AN_S.ingOp, VIV_B, VIV_C) : cero;
+  const sCostOp = completo ? rep(AN_S.costOp, VIV_B, VIV_C) : cero;
+  const sVenta = completo ? rep(AN_S.venta, VIV_B, VIV_C) : cero;
+  const factG = completo ? factG_T : cero;
+
+  const tFlujo = addv(ingTierra, infra, mitig, comercializacion, mant, equip, sanInv, factPG_T, sIngOp, sCostOp, sVenta);
+  const tRes = addv(tFlujo, factG);
   const tVanFlow = addv(tFlujo, tierraDev);
   const tResAcum = acum(tRes);
 
   const tierra: Unidad = {
     id: "tierra",
-    nombre: "Negocio Inmobiliario",
+    nombre: ALCANCE_LABEL[alcance],
     ingresos: [
       { label: "Ingresos Venta de Tierra", arr: ingSinCopec, total: suma(ingSinCopec) },
       { label: "Venta terreno COPEC", arr: copec, total: suma(copec) },
+      ...(completo
+        ? [
+            { label: "Ingresos Operacionales Sanitarios", arr: sIngOp, total: suma(sIngOp) },
+            { label: "Venta Negocio Sanitario (2045)", arr: sVenta, total: suma(sVenta) },
+          ]
+        : []),
     ],
     costos: [
       { label: "Costos Infraestructura", arr: infra, total: suma(infra) },
@@ -330,7 +358,12 @@ export function computeConsolidado(audp: Audp = "ambos", tasa: number = VAN_RATE
       { label: "Comercialización (2%)", arr: comercializacion, total: suma(comercializacion) },
       { label: "Mantención y seguridad", arr: mant, total: suma(mant) },
       { label: "Equipamiento comercial (neto)", arr: equip, total: suma(equip) },
-      { label: "Inversiones Sanitarias (asumidas)", arr: sanInv, total: suma(sanInv) },
+      {
+        label: completo ? "Inversiones Sanitarias" : "Inversiones Sanitarias (asumidas)",
+        arr: sanInv,
+        total: suma(sanInv),
+      },
+      ...(completo ? [{ label: "Costos Operacionales Sanitarios", arr: sCostOp, total: suma(sCostOp) }] : []),
       {
         label: "Factibilización por gastar (incl. sanitaria)",
         arr: factPG_T,
@@ -343,6 +376,9 @@ export function computeConsolidado(audp: Audp = "ambos", tasa: number = VAN_RATE
               ]
             : undefined,
       },
+      ...(completo
+        ? [{ label: "Factibilización gastada al 2026 (incl. sanitaria)", arr: factG, total: suma(factG) }]
+        : []),
       { label: "Costo de la Tierra (aporte, devengado)", arr: tierraDev, total: suma(tierraDev) },
     ],
     flujo: tFlujo,
@@ -352,12 +388,12 @@ export function computeConsolidado(audp: Audp = "ambos", tasa: number = VAN_RATE
     van: npvAt(tVanFlow, tasa),
     vanTasa: tasa,
     // la TIR corre desde hoy e incluye la factibilización gastada
-    tir: tirDe(tVanFlow),
+    tir: tirDe(addv(tVanFlow, factG)),
     capitalTrabajo: Math.abs(Math.min(...tResAcum, 0)),
     payback: paybackDe(tResAcum),
     flujosPermanentes: permanentesDe(tRes),
-    totalIngresos: suma(ingTierra),
-    totalCostos: suma(addv(infra, mitig, comercializacion, mant, equip, sanInv, factPG_T)),
+    totalIngresos: suma(addv(ingTierra, sIngOp, sVenta)),
+    totalCostos: suma(addv(infra, mitig, comercializacion, mant, equip, sanInv, sCostOp, factPG_T, factG)),
     totalResultado: suma(tRes),
   };
 
