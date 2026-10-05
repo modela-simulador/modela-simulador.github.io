@@ -19,17 +19,17 @@ const chk = (nombre: string, a: number, b: number, tol = 1) => {
 };
 
 console.log("── invariante: Batuco + Colina = Ambos ──");
-for (const u of ["tierra", "sanitaria", "consolidado"] as const) {
-  const i = { tierra: 0, sanitaria: 1, consolidado: 2 }[u];
-  const g = (x: ReturnType<typeof computeConsolidado>) => [x.tierra, x.sanitaria, x.consolidado][i];
+for (const u of ["tierra", "sanitaria"] as const) {
+  const i = { tierra: 0, sanitaria: 1 }[u];
+  const g = (x: ReturnType<typeof computeConsolidado>) => [x.tierra, x.sanitaria][i];
   chk(`${u} · resultado`, g(B).totalResultado + g(C).totalResultado, g(A).totalResultado);
   chk(`${u} · ingresos`, g(B).totalIngresos + g(C).totalIngresos, g(A).totalIngresos);
   chk(`${u} · costos`, g(B).totalCostos + g(C).totalCostos, g(A).totalCostos);
 }
 console.log("\n── aditividad del VAN y del costo de la tierra ──");
-for (const u of ["tierra", "sanitaria", "consolidado"] as const) {
-  const i = { tierra: 0, sanitaria: 1, consolidado: 2 }[u];
-  const g = (x: ReturnType<typeof computeConsolidado>) => [x.tierra, x.sanitaria, x.consolidado][i];
+for (const u of ["tierra", "sanitaria"] as const) {
+  const i = { tierra: 0, sanitaria: 1 }[u];
+  const g = (x: ReturnType<typeof computeConsolidado>) => [x.tierra, x.sanitaria][i];
   chk(`${u} · VAN`, g(B).van + g(C).van, g(A).van, 0.5);
 }
 const tierraDe = (x: ReturnType<typeof computeConsolidado>) =>
@@ -41,7 +41,7 @@ chk("Costo de la Tierra · suma", -(tierraDe(B) + tierraDe(C)), 343000, 1);
 console.log("\n── año a año del flujo consolidado ──");
 let peor = 0;
 YEARS.forEach((y, i) => {
-  const d = Math.abs(B.consolidado.resultado[i] + C.consolidado.resultado[i] - A.consolidado.resultado[i]);
+  const d = Math.abs(B.tierra.resultado[i] + C.tierra.resultado[i] - A.tierra.resultado[i]);
   if (d > peor) peor = d;
 });
 chk("peor desviación anual (UF)", peor, 0, 0.01);
@@ -71,9 +71,16 @@ const primero = (a: number[]) => YEARS[a.findIndex((v) => v > 0.0005)];
 chk("primer año con hectáreas", primero(A.fisico.haAnual), 2031, 0);
 chk("primer año con viviendas", primero(A.fisico.vivAnual), 2031, 0);
 
+// el inmobiliario no puede llevarse nada operacional ni la venta de la sanitaria
+const etiquetas = [...A.tierra.ingresos, ...A.tierra.costos].map((l) => l.label).join(" | ");
+chk("inmobiliario sin líneas de la sanitaria",
+  /Operacional|Pago Desarrollador|Venta Negocio Sanitario/.test(etiquetas) ? 1 : 0, 0, 0);
+chk("inmobiliario conserva el capex sanitario",
+  A.tierra.costos.some((l) => l.label.startsWith("Inversiones Sanitarias")) ? 1 : 0, 1, 0);
+
 console.log("\n── indicadores por AUDP ──");
 for (const [n, x] of [["Batuco", B], ["Colina", C], ["Ambos", A]] as const) {
-  const c = x.consolidado;
+  const c = x.tierra;
   console.log(`  ${n.padEnd(7)} resultado ${Math.round(c.totalResultado).toLocaleString("es-CL").padStart(10)} UF · VAN ${Math.round(c.van).toLocaleString("es-CL").padStart(9)} · TIR ${((c.tir ?? 0) * 100).toFixed(1)}% · KT ${Math.round(c.capitalTrabajo).toLocaleString("es-CL").padStart(8)} · payback ${c.payback}`);
 }
 console.log(fallas === 0 ? "\n✓ TODO CUADRA" : `\n✗ ${fallas} FALLAS`);

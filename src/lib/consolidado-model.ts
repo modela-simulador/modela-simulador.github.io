@@ -306,7 +306,7 @@ export function computeConsolidado(audp: Audp = "ambos"): { tierra: Unidad; sani
 
   const tierra: Unidad = {
     id: "tierra",
-    nombre: "Venta de Tierra",
+    nombre: "Negocio Inmobiliario",
     ingresos: [
       { label: "Ingresos Venta de Tierra", arr: ingSinCopec, total: suma(ingSinCopec) },
       { label: "Venta terreno COPEC", arr: copec, total: suma(copec) },
@@ -393,52 +393,12 @@ export function computeConsolidado(audp: Audp = "ambos"): { tierra: Unidad; sani
   };
 
   // ── CONSOLIDADO ──
-  const cFlujo = addv(tFlujo, sFlujo);
-  const cRes = addv(tRes, sRes);
-  const cResAcum = acum(cRes);
-  const cVanFlow = addv(tVanFlow, sFlujo);
-
-  const consolidado: Unidad = {
-    id: "consolidado",
-    nombre: "Consolidado",
-    ingresos: [...tierra.ingresos, ...sanitaria.ingresos],
-    costos: [
-      ...tierra.costos.filter((c) => !c.label.startsWith("Costo de la Tierra") && !c.label.startsWith("Factibilización")),
-      ...sanitaria.costos.filter((c) => !c.label.startsWith("Factibilización")),
-      {
-        label: "Factibilización por gastar",
-        arr: addv(factPG_T, sFactPG),
-        total: suma(factPG_T) + suma(sFactPG),
-        detalle: [
-          { label: "Tierra", arr: factPG_T, total: suma(factPG_T) },
-          { label: "Sanitaria", arr: sFactPG, total: suma(sFactPG) },
-        ],
-      },
-      {
-        label: "Factibilización gastada (al 2026)",
-        arr: addv(factG_T, sFactG),
-        total: suma(factG_T) + suma(sFactG),
-        detalle: [
-          { label: "Tierra", arr: factG_T, total: suma(factG_T) },
-          { label: "Sanitaria", arr: sFactG, total: suma(sFactG) },
-        ],
-      },
-      tierra.costos.find((c) => c.label.startsWith("Costo de la Tierra"))!,
-    ],
-    flujo: cFlujo,
-    resultado: cRes,
-    resultadoAcum: cResAcum,
-    flujoVan: cVanFlow,
-    // VAN consolidado = suma de los VAN por unidad (tierra al 8%, sanitaria al 7%)
-    van: npvAt(tVanFlow, VAN_RATE) + npvAt(sFlujo, VAN_RATE_SAN),
-    tir: tirDe(addv(cVanFlow, factG_T, sFactG)),
-    capitalTrabajo: Math.abs(Math.min(...cResAcum, 0)),
-    payback: paybackDe(cResAcum),
-    flujosPermanentes: permanentesDe(cRes),
-    totalIngresos: tierra.totalIngresos + sanitaria.totalIngresos,
-    totalCostos: tierra.totalCostos + sanitaria.totalCostos,
-    totalResultado: suma(cRes),
-  };
+  // La lámina evalúa SOLO el negocio inmobiliario (criterio del Directorio,
+  // 2026-10-05): el inmobiliario asume las inversiones sanitarias, pero no
+  // toma nada operacional de la sanitaria, ni el pago del desarrollador, ni
+  // la venta del negocio sanitario. La unidad Sanitaria queda como referencia
+  // y no se suma. Por eso el consolidado es el negocio inmobiliario.
+  const consolidado: Unidad = { ...tierra, id: "consolidado", nombre: "Negocio Inmobiliario" };
 
   // ── venta física, con la curva de venta de suelo de esta vista ──
   const fisico = fisicoDe(ingSinCopec, HA_TOTAL_DE[audp], VIV_TOTAL_DE[audp]);

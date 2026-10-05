@@ -54,10 +54,12 @@ export async function construirLibroConsolidado(unidades: Unidad[]): Promise<Wor
   const wb = new ExcelJS.Workbook();
   wb.creator = "Modela";
   wb.company = "Modela";
-  const [tierra, sanitaria, consolidado] = unidades;
-  const ctxT = hojaTierra(wb, tierra);
-  const ctxS = hojaSanitaria(wb, sanitaria);
-  hojaConsolidado(wb, consolidado, ctxT, ctxS);
+  // dos hojas: el negocio inmobiliario (lo que se evalúa) y la sanitaria de
+  // referencia. El consolidado dejó de sumar la sanitaria, así que repetía
+  // la hoja del inmobiliario.
+  const [tierra, sanitaria] = unidades;
+  hojaTierra(wb, tierra);
+  hojaSanitaria(wb, sanitaria);
   return wb;
 }
 
@@ -487,89 +489,4 @@ function hojaSanitaria(wb: Workbook, u: Unidad): Ctx {
     "Capital de trabajo sobre el flujo futuro (sin la factibilización gastada): el pago del desarrollador ya netea las inversiones — criterio del simulador para los modos sanitarios. La TIR sí corre desde 2026 con la gastada.",
   ]);
   return ctx;
-}
-
-// ── hoja CONSOLIDADO ─────────────────────────────────────────
-
-function hojaConsolidado(wb: Workbook, u: Unidad, t: Ctx, s: Ctx) {
-  const ctx = abrirHoja(wb, "Consolidado", "Tierra + Sanitaria · flujo anual en UF");
-  const ws = ctx.ws;
-  cabeceraAnios(ctx);
-
-  const g = (label: string) => lineaDe(u, label);
-  const ref = (hoja: "Tierra" | "Sanitaria", fila: number, label: string, opts?: { informativa?: boolean }) => {
-    const l = g(label);
-    return linea(
-      ctx,
-      label,
-      l.arr.map((v, i) => {
-        const c = L(i + 2);
-        return Math.abs(v) > 0.5 ? F(`${hoja}!${c}${fila}`, Math.round(v)) : null;
-      }),
-      l.total,
-      opts,
-    );
-  };
-
-  banda(ws, "INGRESOS", COL_TOT);
-  ref("Tierra", t.filas["Ingresos Venta de Tierra"], "Ingresos Venta de Tierra");
-  ref("Tierra", t.filas["Venta terreno COPEC"], "Venta terreno COPEC");
-  ref("Sanitaria", s.filas["Ingresos Operacionales"], "Ingresos Operacionales");
-  ref("Sanitaria", s.filas["Pago Desarrollador (neteo inversiones)"], "Pago Desarrollador (neteo inversiones)");
-  ref("Sanitaria", s.filas["Venta Negocio Sanitario (2045)"], "Venta Negocio Sanitario (2045)");
-  const filasIng = ["Ingresos Venta de Tierra", "Venta terreno COPEC", "Ingresos Operacionales", "Pago Desarrollador (neteo inversiones)", "Venta Negocio Sanitario (2045)"].map((l) => ctx.filas[l]);
-
-  banda(ws, "COSTOS", COL_TOT);
-  ref("Tierra", t.filas["Costos Infraestructura"], "Costos Infraestructura");
-  ref("Tierra", t.filas["Costos Mitigaciones"], "Costos Mitigaciones");
-  ref("Tierra", t.filas["Comercialización (2%)"], "Comercialización (2%)");
-  ref("Tierra", t.filas["Mantención y seguridad"], "Mantención y seguridad");
-  ref("Tierra", t.filas["Equipamiento comercial (neto)"], "Equipamiento comercial (neto)");
-  ref("Tierra", t.filas["Inversiones Sanitarias (asumidas)"], "Inversiones Sanitarias (asumidas)");
-  ref("Sanitaria", s.filas["Costos Operacionales"], "Costos Operacionales");
-  ref("Sanitaria", s.filas["Inversiones Sanitarias"], "Inversiones Sanitarias");
-  // factibilización agrupada CON apertura por unidad (sub-filas que referencian cada hoja)
-  lineaAgrupada(ctx, g("Factibilización por gastar"), (hija, c) =>
-    hija.label === "Tierra" ? `Tierra!${c}${t.filas["Factibilización por gastar"]}` : `Sanitaria!${c}${s.filas["Factibilización por gastar"]}`,
-  );
-  lineaAgrupada(ctx, g("Factibilización gastada (al 2026)"), (hija, c) =>
-    hija.label === "Tierra" ? `Tierra!${c}${t.filas["Factibilización gastada (al 2026)"]}` : `Sanitaria!${c}${s.filas["Factibilización gastada (al 2026)"]}`,
-  );
-  const filasCos = ["Costos Infraestructura", "Costos Mitigaciones", "Comercialización (2%)", "Mantención y seguridad", "Equipamiento comercial (neto)", "Inversiones Sanitarias (asumidas)", "Costos Operacionales", "Inversiones Sanitarias", "Factibilización por gastar", "Factibilización gastada (al 2026)"].map((l) => ctx.filas[l]);
-  const rGastada = ctx.filas["Factibilización gastada (al 2026)"];
-
-  filasNeto(ctx, [...filasIng, ...filasCos], u.resultado, u.resultadoAcum, u.totalResultado);
-  const nf = ctx.filas["FLUJO NETO"];
-
-  const dev = g("Costo de la Tierra (aporte, devengado)");
-  ref("Tierra", t.filas["Costo de la Tierra (aporte, devengado)"], dev.label, { informativa: true });
-  const rDev = ctx.filas[dev.label];
-
-  const econ = u.resultado.map((v, i) => v + dev.arr[i]);
-  linea(
-    ctx,
-    "Flujo económico (c/ tierra, incl. factib. gastada)",
-    econ.map((v, i) => {
-      const c = L(i + 2);
-      return F(`${c}${nf}+SUM(${c}${rDev})`, Math.round(v));
-    }),
-    econ.reduce((a, b) => a + b, 0),
-    { informativa: true },
-  );
-
-  indicadores(ctx, u, {
-    filaEcon: ctx.filas["Flujo económico (c/ tierra, incl. factib. gastada)"],
-    filaGastada: rGastada,
-    filaCajaKT: ctx.filas["Caja acumulada"],
-    filasIng,
-    filasCos,
-    vanLabel: "VAN (tierra 8% · sanitaria 7%)",
-    vanFormula: `Tierra!B${t.filas["__van"]}+Sanitaria!B${s.filas["__van"]}`,
-    tasaRef: `Tierra!$B$${t.filas["__tasa"]}`,
-    tirLabel: "TIR c/ tierra (incl. factib. gastada)",
-  });
-  notas(ctx, [
-    "Cada celda de esta hoja referencia a las hojas Tierra y Sanitaria: tocar un número allá recalcula el consolidado. El VAN consolidado suma los VAN por unidad (tierra al 8%, sanitaria al 7%); la TIR corre sobre el flujo combinado desde 2026, con la factibilización gastada.",
-    "Las dos factibilizaciones se aperturan con el botón + del margen: la parte de la Tierra y la de la Sanitaria.",
-  ]);
 }

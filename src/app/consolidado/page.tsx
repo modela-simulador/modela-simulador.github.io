@@ -27,8 +27,9 @@ const un = (n: number) => (Math.abs(n) < 0.5 ? "·" : Math.round(n).toLocaleStri
 
 export default function ConsolidadoPage() {
   const [audp, setAudp] = useState<Audp>("ambos");
-  const { tierra, sanitaria, consolidado, fisico } = useMemo(() => computeConsolidado(audp), [audp]);
-  const unidades = [tierra, sanitaria, consolidado];
+  const { tierra, sanitaria, fisico } = useMemo(() => computeConsolidado(audp), [audp]);
+  // la lámina evalúa el negocio inmobiliario; la sanitaria va de referencia
+  const unidades = [tierra, sanitaria];
   const [bajando, setBajando] = useState(false);
   const exportar = async () => {
     setBajando(true);
@@ -48,7 +49,7 @@ export default function ConsolidadoPage() {
         </a>
         <div className="h-5 w-px bg-zinc-800" />
         <div className="min-w-0">
-          <h1 className="text-base font-bold leading-tight">Consolidado por Unidad de Negocio</h1>
+          <h1 className="text-base font-bold leading-tight">Consolidado — Negocio Inmobiliario</h1>
           <p className="text-[11px] text-zinc-500 truncate">
             {AUDP_LABEL[audp]} · flujo anual en UF · {YEARS[0]} – {YEARS[YEARS.length - 1]}
           </p>
@@ -90,14 +91,14 @@ export default function ConsolidadoPage() {
 
       <main className="p-4 space-y-4 max-w-[1500px] mx-auto">
         {/* ── indicadores por unidad ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {unidades.map((u) => (
-            <UnidadCard key={u.id} u={u} destacada={u.id === "consolidado"} />
+            <UnidadCard key={u.id} u={u} destacada={u.id === "tierra"} />
           ))}
         </div>
 
-        <Fisico f={fisico} u={consolidado} audp={audp} />
-        <FlujoChart u={consolidado} />
+        <Fisico f={fisico} u={tierra} audp={audp} />
+        <FlujoChart u={tierra} />
         <FlujoTable unidades={unidades} fisico={fisico} />
         <Criterios />
         {audp === "ambos" ? (
@@ -123,6 +124,11 @@ function UnidadCard({ u, destacada }: { u: Unidad; destacada?: boolean }) {
       <div className="flex items-baseline justify-between mb-2.5">
         <h2 className={`text-[12px] uppercase tracking-wider font-bold ${destacada ? "text-emerald-300" : "text-zinc-300"}`}>
           {u.nombre}
+          {u.id === "sanitaria" && (
+            <span className="ml-2 normal-case tracking-normal font-normal text-[10px] text-zinc-500">
+              referencia · no se suma
+            </span>
+          )}
         </h2>
         <span className={`text-sm font-bold tabular-nums ${u.totalResultado >= 0 ? "text-green-400" : "text-red-400"}`}>
           {uf(u.totalResultado)}
@@ -130,7 +136,7 @@ function UnidadCard({ u, destacada }: { u: Unidad; destacada?: boolean }) {
       </div>
       <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
         <Kpi
-          label={u.id === "sanitaria" ? `VAN ${tasa(VAN_RATE_SAN)}` : u.id === "consolidado" ? `VAN · T ${tasa(VAN_RATE)} / S ${tasa(VAN_RATE_SAN)}` : `VAN ${tasa(VAN_RATE)} c/ tierra`}
+          label={u.id === "sanitaria" ? `VAN ${tasa(VAN_RATE_SAN)}` : `VAN ${tasa(VAN_RATE)} c/ tierra`}
           value={uf(u.van)}
           color={u.van >= 0 ? "text-green-400" : "text-red-400"}
         />
@@ -291,7 +297,7 @@ function FlujoTable({ unidades, fisico }: { unidades: Unidad[]; fisico: Fisico }
     <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg overflow-hidden">
       <div className="px-3 py-2 border-b border-zinc-800">
         <h3 className="text-[11px] uppercase tracking-wider font-semibold text-zinc-400">
-          Flujo anual por unidad de negocio · UF
+          Flujo anual · negocio inmobiliario y sanitaria · UF
         </h3>
       </div>
       <div className="overflow-x-auto">
@@ -425,6 +431,11 @@ function Criterios() {
   return (
     <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg p-3.5 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-[11px] text-zinc-500 leading-relaxed">
       <p>
+        <span className="text-zinc-300 font-semibold">Hectáreas y viviendas:</span> 39,98 ha (Batuco 16,51 · Colina
+        23,47) y 4.350 viviendas (1.906 · 2.444), del simulador en modo Solo AUDP. Se reparten con la curva de venta de
+        suelo de esta vista, así que arrancan en 2031 con el primer macrolote.
+      </p>
+      <p>
         <span className="text-zinc-300 font-semibold">Tierra ({nf(TIERRA_AUDP)} UF):</span> se devenga proporcional a la
         venta e impacta VAN, TIR y costos, pero no el capital de trabajo — es un aporte de los dueños, no caja a financiar.
       </p>
@@ -434,19 +445,21 @@ function Criterios() {
         residuos siguen la forma de las planillas anuales para que los totales calcen con ellas.
       </p>
       <p>
-        <span className="text-zinc-300 font-semibold">Unidades:</span> la tierra asume las inversiones sanitarias; la
-        sanitaria las paga y recibe del desarrollador un pago equivalente (neto 0), opera la planta y el 2045 vende el
-        negocio en 147.433 UF.
+        <span className="text-zinc-300 font-semibold">Qué se evalúa:</span> solo el negocio inmobiliario. Asume las
+        inversiones sanitarias (318.587 UF) porque las financia, pero no toma nada operacional de la sanitaria, ni el
+        pago del desarrollador, ni la venta del negocio sanitario. La unidad Sanitaria va de referencia y no se suma:
+        paga las inversiones y recibe del desarrollador un pago equivalente (neto 0), opera la planta y el 2045 vende
+        el negocio en 147.433 UF.
       </p>
       <p>
-        <span className="text-zinc-300 font-semibold">Capital de trabajo:</span> Tierra y Consolidado sobre el resultado
-        acumulado (incluye factibilización gastada); Sanitaria sobre el flujo futuro — el pago del desarrollador ya netea
-        las inversiones (criterio del simulador).
+        <span className="text-zinc-300 font-semibold">Capital de trabajo:</span> el inmobiliario sobre el resultado
+        acumulado (incluye factibilización gastada); la sanitaria sobre el flujo futuro — el pago del desarrollador ya
+        netea las inversiones (criterio del simulador).
       </p>
       <p>
         <span className="text-zinc-300 font-semibold">Tasas y TIR:</span> la TIR corre desde 2026 e incluye la
-        factibilización gastada. El VAN la excluye (costo hundido): tierra al {tasa(VAN_RATE)}, sanitaria al {tasa(VAN_RATE_SAN)},
-        y el consolidado suma los VAN por unidad. La etapa 6 de la planta cierra completa en 2041.
+        factibilización gastada. El VAN la excluye (costo hundido): el inmobiliario al {tasa(VAN_RATE)} y la sanitaria
+        al {tasa(VAN_RATE_SAN)}. La etapa 6 de la planta cierra completa en 2041.
       </p>
     </div>
   );
