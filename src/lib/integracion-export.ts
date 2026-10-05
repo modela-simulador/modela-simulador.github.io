@@ -78,10 +78,17 @@ export async function descargarFlujos(cfg: ExportFlujosConfig) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
+  // el enlace tiene que estar en el documento (Firefox lo exige) y la URL no
+  // se puede revocar en el mismo tick: Safari cancela la descarga
+  a.style.display = "none";
   const slug = escenario.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   a.download = `flujo-integracion-${slug}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 2000);
 }
 
 // ── piezas de diseño compartidas ─────────────────────────────

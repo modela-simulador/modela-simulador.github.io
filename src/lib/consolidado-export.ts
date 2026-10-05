@@ -26,7 +26,7 @@ import {
   VERDE,
   ZEBRA,
 } from "./integracion-export";
-import { AUDP_LABEL, TIERRA_AUDP, VAN_RATE, VAN_RATE_SAN, YEARS, type Audp, type Linea, type Unidad } from "./consolidado-model";
+import { AUDP_LABEL, TIERRA_AUDP, VAN_RATE, YEARS, type Audp, type Linea, type Unidad } from "./consolidado-model";
 
 const TITULO_BASE = "Consolidado por Unidad de Negocio";
 /** Título del libro según la AUDP en pantalla. */
@@ -39,8 +39,11 @@ const LU = L(NY + 1);
 const rango = (row: number) => `B${row}:${LU}${row}`;
 const n0 = (v: number): number | null => (Math.abs(v) > 0.5 ? Math.round(v) : null);
 
-/** Fórmula con resultado cacheado: Excel/LibreOffice muestran el valor y recalculan al editar. */
-const F = (formula: string, result: number): CellValue => ({ formula, result });
+/** Fórmula con resultado cacheado: Excel/LibreOffice muestran el valor y recalculan al editar.
+ *  Sin fórmula devuelve el número pelado: exceljs serializa {formula:"",result:N} como el
+ *  TEXTO '{"formula":"","result":N}', y Excel abre el libro "Reparado" y vacío. */
+const F = (formula: string, result: number): CellValue =>
+  formula ? { formula, result } : result;
 
 interface Ctx {
   ws: Worksheet;
@@ -57,9 +60,8 @@ export async function construirLibroConsolidado(unidades: Unidad[]): Promise<Wor
   // dos hojas: el negocio inmobiliario (lo que se evalúa) y la sanitaria de
   // referencia. El consolidado dejó de sumar la sanitaria, así que repetía
   // la hoja del inmobiliario.
-  const [tierra, sanitaria] = unidades;
-  hojaTierra(wb, tierra);
-  hojaSanitaria(wb, sanitaria);
+  const [inmobiliario] = unidades;
+  hojaTierra(wb, inmobiliario);
   return wb;
 }
 
@@ -73,10 +75,17 @@ export async function descargarConsolidado(unidades: Unidad[], audp: Audp = "amb
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
+  // el enlace tiene que estar en el documento (Firefox lo exige) y la URL no
+  // se puede revocar en el mismo tick: Safari cancela la descarga
+  a.style.display = "none";
   const sufijo = audp === "ambos" ? "" : `-${audp}`;
   a.download = `consolidado-unidades-negocio${sufijo}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 2000);
 }
 
 // ── esqueleto común ──────────────────────────────────────────
@@ -161,9 +170,11 @@ function lineaAgrupada(ctx: Ctx, l: Linea, refHija?: (hija: Linea, col: string) 
     ctx,
     l.label,
     l.arr.map((v, i) => {
+      // sin apertura (vista filtrada por AUDP) la fila no suma hijas: va el valor
+      if (!hijas.length) return n0(v);
       const c = L(i + 2);
       const f = hijas.map((r) => `SUM(${c}${r})`).join("+");
-      return Math.abs(v) > 0.5 || hijas.length ? F(f, Math.round(v)) : null;
+      return F(f, Math.round(v));
     }),
     l.total,
   );
@@ -396,97 +407,6 @@ function hojaTierra(wb: Workbook, u: Unidad): Ctx {
     "La tierra se devenga proporcional a la venta e impacta VAN, TIR y costos, pero no el capital de trabajo: es un aporte de los dueños, no caja a financiar. La TIR corre desde 2026 e incluye la factibilización gastada; el VAN la excluye por ser costo hundido.",
     "Hasta 2034 mandan los números de la planilla semestral de Integración (urbanizar primero, vender después). Desde 2035 los residuos siguen la forma de la planilla anual de Primeras Etapas AUDP: los totales calzan con ella. La etapa 6 de la planta cierra completa en 2041.",
     "La factibilización por gastar se apertura con el botón + del margen: AUDP Batuco y AUDP Colina.",
-  ]);
-  return ctx;
-}
-
-// ── hoja SANITARIA ───────────────────────────────────────────
-
-function hojaSanitaria(wb: Workbook, u: Unidad): Ctx {
-  const ctx = abrirHoja(wb, "Sanitaria", "Negocio Sanitario · flujo anual en UF");
-  const ws = ctx.ws;
-
-  banda(ws, "SUPUESTOS", COL_TOT);
-  const row = ws.addRow(["Tasa de descuento sanitaria", VAN_RATE_SAN]);
-  row.getCell(1).font = { name: FUENTE, size: 9.5, color: { argb: TINTA } };
-  row.getCell(1).border = LINEA_ABAJO;
-  const cTasa = row.getCell(2);
-  cTasa.font = { name: FUENTE, size: 9.5, bold: true, color: { argb: TINTA } };
-  cTasa.alignment = { horizontal: "right" };
-  cTasa.numFmt = "0%";
-  cTasa.border = LINEA_ABAJO;
-  const rTasaS = row.number;
-  ctx.filas["__tasa"] = rTasaS;
-  ws.addRow([]);
-
-  cabeceraAnios(ctx);
-  banda(ws, "INGRESOS", COL_TOT);
-  const ingOp = lineaDe(u, "Ingresos Operacionales");
-  const pago = lineaDe(u, "Pago Desarrollador (neteo inversiones)");
-  const venta = lineaDe(u, "Venta Negocio Sanitario (2045)");
-  linea(ctx, ingOp.label, ingOp.arr.map(n0), ingOp.total);
-  const pagoRow = linea(ctx, pago.label, pago.arr.map(n0), pago.total);
-  linea(ctx, venta.label, venta.arr.map(n0), venta.total);
-
-  banda(ws, "COSTOS", COL_TOT);
-  for (const label of ["Costos Operacionales", "Inversiones Sanitarias", "Factibilización por gastar", "Factibilización gastada (al 2026)"]) {
-    const l = lineaDe(u, label);
-    linea(ctx, l.label, l.arr.map(n0), l.total);
-  }
-  const rInv = ctx.filas["Inversiones Sanitarias"];
-  for (let i = 0; i < NY; i++) {
-    const c = L(i + 2);
-    ws.getCell(`${c}${pagoRow.number}`).value =
-      Math.abs(pago.arr[i]) > 0.5 ? F(`-${c}${rInv}`, Math.round(pago.arr[i])) : null;
-  }
-
-  const filasIng = [ingOp.label, pago.label, venta.label].map((l) => ctx.filas[l]);
-  const filasCos = ["Costos Operacionales", "Inversiones Sanitarias", "Factibilización por gastar", "Factibilización gastada (al 2026)"].map((l) => ctx.filas[l]);
-  const rGastada = ctx.filas["Factibilización gastada (al 2026)"];
-  filasNeto(ctx, [...filasIng, ...filasCos], u.resultado, u.resultadoAcum, u.totalResultado);
-  const nf = ctx.filas["FLUJO NETO"];
-
-  // caja sin la factibilización gastada: la base del KT sanitario
-  linea(
-    ctx,
-    "Flujo s/ factib. gastada",
-    u.flujo.map((v, i) => {
-      const c = L(i + 2);
-      return F(`${c}${nf}-SUM(${c}${rGastada})`, Math.round(v));
-    }),
-    u.flujo.reduce((a, b) => a + b, 0),
-    { informativa: true },
-  );
-  const rEcon = ctx.filas["Flujo s/ factib. gastada"];
-  const cajaFut: number[] = [];
-  u.flujo.reduce((s, v) => {
-    const n = s + v;
-    cajaFut.push(n);
-    return n;
-  }, 0);
-  linea(
-    ctx,
-    "Caja acumulada s/ factib. gastada",
-    cajaFut.map((v, i) =>
-      i === 0 ? F(`B${rEcon}`, Math.round(v)) : F(`${L(i + 1)}${rEcon + 1}+${L(i + 2)}${rEcon}`, Math.round(v)),
-    ),
-    cajaFut[NY - 1],
-    { informativa: true, totalFormula: `${LU}${rEcon + 1}` },
-  );
-
-  indicadores(ctx, u, {
-    filaEcon: nf, // TIR sanitaria sobre el flujo neto (incluye la gastada)
-    filaGastada: rGastada,
-    filaCajaKT: ctx.filas["Caja acumulada s/ factib. gastada"],
-    filasIng,
-    filasCos,
-    vanLabel: `VAN (${VAN_RATE_SAN * 100}%)`,
-    tasaRef: `$B$${rTasaS}`,
-    tirLabel: "TIR (incl. factib. gastada)",
-  });
-  notas(ctx, [
-    "La sanitaria paga las inversiones y recibe del desarrollador un pago equivalente (efecto neto 0): el desarrollo de la tierra las asume. Opera la planta y el 2045 vende el negocio en 147.433 UF. Se descuenta al 7%.",
-    "Capital de trabajo sobre el flujo futuro (sin la factibilización gastada): el pago del desarrollador ya netea las inversiones — criterio del simulador para los modos sanitarios. La TIR sí corre desde 2026 con la gastada.",
   ]);
   return ctx;
 }

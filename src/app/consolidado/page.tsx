@@ -9,7 +9,6 @@ import {
   PARIDAD_PLANILLAS,
   TIERRA_AUDP,
   VAN_RATE,
-  VAN_RATE_SAN,
   YEARS,
   type Audp,
   type Fisico,
@@ -27,14 +26,12 @@ const un = (n: number) => (Math.abs(n) < 0.5 ? "·" : Math.round(n).toLocaleStri
 
 export default function ConsolidadoPage() {
   const [audp, setAudp] = useState<Audp>("ambos");
-  const { tierra, sanitaria, fisico } = useMemo(() => computeConsolidado(audp), [audp]);
-  // la lámina evalúa el negocio inmobiliario; la sanitaria va de referencia
-  const unidades = [tierra, sanitaria];
+  const { inmobiliario, fisico } = useMemo(() => computeConsolidado(audp), [audp]);
   const [bajando, setBajando] = useState(false);
   const exportar = async () => {
     setBajando(true);
     try {
-      await descargarConsolidado(unidades, audp);
+      await descargarConsolidado([inmobiliario], audp);
     } finally {
       setBajando(false);
     }
@@ -51,7 +48,7 @@ export default function ConsolidadoPage() {
         <div className="min-w-0">
           <h1 className="text-base font-bold leading-tight">Consolidado — Negocio Inmobiliario</h1>
           <p className="text-[11px] text-zinc-500 truncate">
-            {AUDP_LABEL[audp]} · flujo anual en UF · {YEARS[0]} – {YEARS[YEARS.length - 1]}
+            Negocio inmobiliario · {AUDP_LABEL[audp]} · UF · {YEARS[0]} – {YEARS[YEARS.length - 1]}
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -91,18 +88,14 @@ export default function ConsolidadoPage() {
 
       <main className="p-4 space-y-4 max-w-[1500px] mx-auto">
         {/* ── indicadores por unidad ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          {unidades.map((u) => (
-            <UnidadCard key={u.id} u={u} destacada={u.id === "tierra"} />
-          ))}
-        </div>
+        <UnidadCard u={inmobiliario} destacada />
 
-        <Fisico f={fisico} u={tierra} audp={audp} />
-        <FlujoChart u={tierra} />
-        <FlujoTable unidades={unidades} fisico={fisico} />
+        <Fisico f={fisico} u={inmobiliario} audp={audp} />
+        <FlujoChart u={inmobiliario} />
+        <FlujoTable unidades={[inmobiliario]} fisico={fisico} />
         <Criterios />
         {audp === "ambos" ? (
-          <Paridad tierra={tierra} sanitaria={sanitaria} />
+          <Paridad tierra={inmobiliario} />
         ) : (
           <p className="text-[11px] text-zinc-500 px-1">
             El contraste con las planillas del simulador corre sobre el total; vuelve a <span className="text-zinc-300">Ambos</span> para verlo.
@@ -124,11 +117,6 @@ function UnidadCard({ u, destacada }: { u: Unidad; destacada?: boolean }) {
       <div className="flex items-baseline justify-between mb-2.5">
         <h2 className={`text-[12px] uppercase tracking-wider font-bold ${destacada ? "text-emerald-300" : "text-zinc-300"}`}>
           {u.nombre}
-          {u.id === "sanitaria" && (
-            <span className="ml-2 normal-case tracking-normal font-normal text-[10px] text-zinc-500">
-              referencia · no se suma
-            </span>
-          )}
         </h2>
         <span className={`text-sm font-bold tabular-nums ${u.totalResultado >= 0 ? "text-green-400" : "text-red-400"}`}>
           {uf(u.totalResultado)}
@@ -136,14 +124,14 @@ function UnidadCard({ u, destacada }: { u: Unidad; destacada?: boolean }) {
       </div>
       <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
         <Kpi
-          label={u.id === "sanitaria" ? `VAN ${tasa(VAN_RATE_SAN)}` : `VAN ${tasa(VAN_RATE)} c/ tierra`}
+          label={`VAN ${tasa(VAN_RATE)} c/ tierra`}
           value={uf(u.van)}
           color={u.van >= 0 ? "text-green-400" : "text-red-400"}
         />
         <Kpi
-          label={u.id === "sanitaria" ? "TIR (incl. f. gastada)" : "TIR c/ tierra (incl. f. gastada)"}
+          label="TIR c/ tierra (incl. f. gastada)"
           value={pct(u.tir)}
-          color={(u.tir ?? 0) >= (u.id === "sanitaria" ? VAN_RATE_SAN : VAN_RATE) ? "text-green-400" : "text-red-400"}
+          color={(u.tir ?? 0) >= VAN_RATE ? "text-green-400" : "text-red-400"}
         />
         <Kpi label="Capital de Trabajo" value={uf(-u.capitalTrabajo)} color="text-red-400" />
         <Kpi label="Payback" value={String(u.payback ?? "—")} color="text-amber-400" />
@@ -213,7 +201,7 @@ function FlujoChart({ u }: { u: Unidad }) {
     <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg p-3">
       <div className="flex items-center gap-4 mb-1 flex-wrap">
         <h3 className="text-[11px] uppercase tracking-wider font-semibold text-zinc-400">
-          Flujo de caja anual consolidado
+          Flujo de caja anual del negocio inmobiliario
         </h3>
         <div className="flex items-center gap-3 text-[10px] text-zinc-500">
           <Legend color="#15803D" label="Flujo positivo" />
@@ -297,7 +285,7 @@ function FlujoTable({ unidades, fisico }: { unidades: Unidad[]; fisico: Fisico }
     <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg overflow-hidden">
       <div className="px-3 py-2 border-b border-zinc-800">
         <h3 className="text-[11px] uppercase tracking-wider font-semibold text-zinc-400">
-          Flujo anual · negocio inmobiliario y sanitaria · UF
+          Flujo anual del negocio inmobiliario · UF
         </h3>
       </div>
       <div className="overflow-x-auto">
@@ -446,27 +434,25 @@ function Criterios() {
       </p>
       <p>
         <span className="text-zinc-300 font-semibold">Qué se evalúa:</span> solo el negocio inmobiliario. Asume las
-        inversiones sanitarias (318.587 UF) porque las financia, pero no toma nada operacional de la sanitaria, ni el
-        pago del desarrollador, ni la venta del negocio sanitario. La unidad Sanitaria va de referencia y no se suma:
-        paga las inversiones y recibe del desarrollador un pago equivalente (neto 0), opera la planta y el 2045 vende
-        el negocio en 147.433 UF.
+        inversiones sanitarias (318.587 UF) y la factibilización completa, la suya y la de la sanitaria, porque las
+        financia. No toma nada operacional de la sanitaria, ni el pago del desarrollador, ni la venta del negocio
+        sanitario: el VAN y la TIR de esta lámina son del inmobiliario solo.
       </p>
       <p>
-        <span className="text-zinc-300 font-semibold">Capital de trabajo:</span> el inmobiliario sobre el resultado
-        acumulado (incluye factibilización gastada); la sanitaria sobre el flujo futuro — el pago del desarrollador ya
-        netea las inversiones (criterio del simulador).
+        <span className="text-zinc-300 font-semibold">Capital de trabajo:</span> el valle del resultado acumulado, que
+        incluye la factibilización ya gastada.
       </p>
       <p>
         <span className="text-zinc-300 font-semibold">Tasas y TIR:</span> la TIR corre desde 2026 e incluye la
-        factibilización gastada. El VAN la excluye (costo hundido): el inmobiliario al {tasa(VAN_RATE)} y la sanitaria
-        al {tasa(VAN_RATE_SAN)}. La etapa 6 de la planta cierra completa en 2041.
+        factibilización gastada. El VAN la excluye por ser costo hundido y descuenta al {tasa(VAN_RATE)}. La etapa 6 de
+        la planta cierra completa en 2041.
       </p>
     </div>
   );
 }
 
 // ── paridad con las planillas anuales del simulador ──────────
-function Paridad({ tierra, sanitaria }: { tierra: Unidad; sanitaria: Unidad }) {
+function Paridad({ tierra }: { tierra: Unidad }) {
   const total = (labelStart: string) => {
     const l = tierra.costos.find((c) => c.label.startsWith(labelStart));
     return l ? Math.round(l.total) : 0;
@@ -477,7 +463,6 @@ function Paridad({ tierra, sanitaria }: { tierra: Unidad; sanitaria: Unidad }) {
     ["Costos Mitigaciones", total("Costos Mitigaciones"), PARIDAD_PLANILLAS.mitigaciones],
     ["Mantención y seguridad", total("Mantención"), PARIDAD_PLANILLAS.mantencion],
     ["Inversiones Sanitarias", total("Inversiones Sanitarias"), PARIDAD_PLANILLAS.inversionesSanitarias],
-    ["Resultado Sanitaria", Math.round(sanitaria.totalResultado), PARIDAD_PLANILLAS.resultadoSanitariaPlanilla],
   ];
   const cuadra = filas.every(([, v, p]) => Math.abs(v - p) < 2);
   return (
@@ -487,7 +472,7 @@ function Paridad({ tierra, sanitaria }: { tierra: Unidad; sanitaria: Unidad }) {
           {cuadra ? "✓ Totales calzan con las planillas del simulador" : "✗ Los totales se desviaron de las planillas"}
         </span>
         <span className="text-[10px] text-zinc-500">
-          primeras_etapas_audp · primeras_etapas_sanAudp · única diferencia: equipamiento comercial ({sg(PARIDAD_PLANILLAS.equipamientoSemestral)} UF, viene de la semestral)
+          primeras_etapas_audp · única diferencia: equipamiento comercial ({sg(PARIDAD_PLANILLAS.equipamientoSemestral)} UF, viene de la semestral)
         </span>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">

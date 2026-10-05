@@ -253,7 +253,7 @@ function permanentesDe(flujo: number[]): number {
   return last >= 0 && last + 1 < NY ? YEARS[last + 1] : YEARS[0];
 }
 
-export function computeConsolidado(audp: Audp = "ambos"): { tierra: Unidad; sanitaria: Unidad; consolidado: Unidad; fisico: Fisico } {
+export function computeConsolidado(audp: Audp = "ambos"): { inmobiliario: Unidad; fisico: Fisico } {
   // Claves de reparto por AUDP (ver Criterios en la página):
   //  ingresos y equipamiento → venta de cada AUDP · infraestructura y
   //  mitigaciones → su propia serie por zona · mantención → hectáreas
@@ -295,9 +295,18 @@ export function computeConsolidado(audp: Audp = "ambos"): { tierra: Unidad; sani
   const tierraDev =
     audp === "batuco" ? tierraDevB : audp === "colina" ? tierraDevC : addv(tierraDevB, tierraDevC);
 
-  // la factibilización ya viene abierta por AUDP en la planilla
-  const factPG_T = audp === "batuco" ? FACTIB_T_BATUCO : audp === "colina" ? FACTIB_T_COLINA : AN_T.factibPorGastar;
-  const factG_T = rep(AN_T.factibGastada, FACTIB_T_BATUCO, FACTIB_T_COLINA);
+  // El negocio inmobiliario asume la factibilización COMPLETA: la suya y la de
+  // la sanitaria (criterio del Directorio, 2026-10-05). La de la tierra ya viene
+  // abierta por AUDP en la planilla; la de la sanitaria se reparte con esa misma
+  // proporción.
+  const factPG_T = addv(
+    audp === "batuco" ? FACTIB_T_BATUCO : audp === "colina" ? FACTIB_T_COLINA : AN_T.factibPorGastar,
+    rep(AN_S.factibPorGastar, FACTIB_T_BATUCO, FACTIB_T_COLINA),
+  );
+  const factG_T = addv(
+    rep(AN_T.factibGastada, FACTIB_T_BATUCO, FACTIB_T_COLINA),
+    rep(AN_S.factibGastada, FACTIB_T_BATUCO, FACTIB_T_COLINA),
+  );
 
   const tFlujo = addv(ingTierra, infra, mitig, comercializacion, mant, equip, sanInv, factPG_T);
   const tRes = addv(tFlujo, factG_T);
@@ -319,18 +328,18 @@ export function computeConsolidado(audp: Audp = "ambos"): { tierra: Unidad; sani
       { label: "Equipamiento comercial (neto)", arr: equip, total: suma(equip) },
       { label: "Inversiones Sanitarias (asumidas)", arr: sanInv, total: suma(sanInv) },
       {
-        label: "Factibilización por gastar",
+        label: "Factibilización por gastar (incl. sanitaria)",
         arr: factPG_T,
         total: suma(factPG_T),
         detalle:
           audp === "ambos"
             ? [
-                { label: "AUDP Batuco", arr: FACTIB_T_BATUCO, total: suma(FACTIB_T_BATUCO) },
-                { label: "AUDP Colina", arr: FACTIB_T_COLINA, total: suma(FACTIB_T_COLINA) },
+                { label: "AUDP Batuco", arr: repartir(factPG_T, FACTIB_T_BATUCO, FACTIB_T_COLINA, "batuco"), total: suma(repartir(factPG_T, FACTIB_T_BATUCO, FACTIB_T_COLINA, "batuco")) },
+                { label: "AUDP Colina", arr: repartir(factPG_T, FACTIB_T_BATUCO, FACTIB_T_COLINA, "colina"), total: suma(repartir(factPG_T, FACTIB_T_BATUCO, FACTIB_T_COLINA, "colina")) },
               ]
             : undefined,
       },
-      { label: "Factibilización gastada (al 2026)", arr: factG_T, total: suma(factG_T) },
+      { label: "Factibilización gastada al 2026 (incl. sanitaria)", arr: factG_T, total: suma(factG_T) },
       { label: "Costo de la Tierra (aporte, devengado)", arr: tierraDev, total: suma(tierraDev) },
     ],
     flujo: tFlujo,
@@ -348,62 +357,10 @@ export function computeConsolidado(audp: Audp = "ambos"): { tierra: Unidad; sani
     totalResultado: suma(tRes),
   };
 
-  // ── unidad SANITARIA ──
-  // la sanitaria sirve a las viviendas: ésa es su clave de reparto
-  const sIngOp = rep(AN_S.ingOp, VIV_B, VIV_C);
-  const sCostOp = rep(AN_S.costOp, VIV_B, VIV_C);
-  const sVenta = rep(AN_S.venta, VIV_B, VIV_C);
-  const sFactPG = rep(AN_S.factibPorGastar, VIV_B, VIV_C);
-  const sFactG = rep(AN_S.factibGastada, VIV_B, VIV_C);
-
-  const sInv = sanInv.slice();
-  const sPagoDev = sanInv.map((v) => -v);
-  const sFlujo = addv(sIngOp, sCostOp, sInv, sPagoDev, sVenta, sFactPG);
-  const sRes = addv(sFlujo, sFactG);
-  const sResAcum = acum(sRes);
-  const sFlujoAcum = acum(sFlujo);
-
-  const sanitaria: Unidad = {
-    id: "sanitaria",
-    nombre: "Sanitaria",
-    ingresos: [
-      { label: "Ingresos Operacionales", arr: sIngOp, total: suma(sIngOp) },
-      { label: "Pago Desarrollador (neteo inversiones)", arr: sPagoDev, total: suma(sPagoDev) },
-      { label: "Venta Negocio Sanitario (2045)", arr: sVenta, total: suma(sVenta) },
-    ],
-    costos: [
-      { label: "Costos Operacionales", arr: sCostOp, total: suma(sCostOp) },
-      { label: "Inversiones Sanitarias", arr: sInv, total: suma(sInv) },
-      { label: "Factibilización por gastar", arr: sFactPG, total: suma(sFactPG) },
-      { label: "Factibilización gastada (al 2026)", arr: sFactG, total: suma(sFactG) },
-    ],
-    flujo: sFlujo,
-    resultado: sRes,
-    resultadoAcum: sResAcum,
-    flujoVan: sFlujo,
-    van: npvAt(sFlujo, VAN_RATE_SAN),
-    tir: tirDe(sRes),
-    // criterio simulador para modos sanitarios: el valle del flujo futuro
-    capitalTrabajo: Math.abs(Math.min(...sFlujoAcum, 0)),
-    payback: paybackDe(sResAcum),
-    flujosPermanentes: permanentesDe(sRes),
-    totalIngresos: suma(addv(sIngOp, sPagoDev, sVenta)),
-    totalCostos: suma(addv(sCostOp, sInv, sFactPG, sFactG)),
-    totalResultado: suma(sRes),
-  };
-
-  // ── CONSOLIDADO ──
-  // La lámina evalúa SOLO el negocio inmobiliario (criterio del Directorio,
-  // 2026-10-05): el inmobiliario asume las inversiones sanitarias, pero no
-  // toma nada operacional de la sanitaria, ni el pago del desarrollador, ni
-  // la venta del negocio sanitario. La unidad Sanitaria queda como referencia
-  // y no se suma. Por eso el consolidado es el negocio inmobiliario.
-  const consolidado: Unidad = { ...tierra, id: "consolidado", nombre: "Negocio Inmobiliario" };
-
   // ── venta física, con la curva de venta de suelo de esta vista ──
   const fisico = fisicoDe(ingSinCopec, HA_TOTAL_DE[audp], VIV_TOTAL_DE[audp]);
 
-  return { tierra, sanitaria, consolidado, fisico };
+  return { inmobiliario: tierra, fisico };
 }
 
 /**
