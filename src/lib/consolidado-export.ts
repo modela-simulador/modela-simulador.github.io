@@ -31,6 +31,8 @@ import { AUDP_LABEL, TIERRA_AUDP, VAN_RATE, YEARS, type Audp, type Linea, type U
 const TITULO_BASE = "Consolidado por Unidad de Negocio";
 /** Título del libro según la AUDP en pantalla. */
 let TITULO = `${TITULO_BASE} — AUDP Batuco + Colina`;
+/** Tasa con la que se arma el libro (la que esté en pantalla). */
+let TASA_LIBRO = VAN_RATE;
 const NY = YEARS.length; // 20 años → columnas B..U; V = Total
 const COL_TOT = NY + 2;
 const L = (n: number) => String.fromCharCode(64 + n); // 2→B … 22→V
@@ -65,8 +67,9 @@ export async function construirLibroConsolidado(unidades: Unidad[]): Promise<Wor
   return wb;
 }
 
-export async function descargarConsolidado(unidades: Unidad[], audp: Audp = "ambos") {
+export async function descargarConsolidado(unidades: Unidad[], audp: Audp = "ambos", tasa: number = VAN_RATE) {
   TITULO = `${TITULO_BASE} — ${AUDP_LABEL[audp]}`;
+  TASA_LIBRO = tasa;
   const wb = await construirLibroConsolidado(unidades);
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], {
@@ -314,7 +317,7 @@ function hojaTierra(wb: Workbook, u: Unidad): Ctx {
     c.border = LINEA_ABAJO;
     return row.number;
   };
-  const rTasa = sup("Tasa de descuento", VAN_RATE, "0%");
+  const rTasa = sup("Tasa de descuento", TASA_LIBRO, "0%");
   const rCom = sup("Comisión de venta", 0.02, "0%");
   const rTierra = sup("Valor de la tierra (aporte)", TIERRA_AUDP, N_UF);
   ctx.filas["__tasa"] = rTasa;
@@ -399,7 +402,7 @@ function hojaTierra(wb: Workbook, u: Unidad): Ctx {
     filaCajaKT: ctx.filas["Caja acumulada"],
     filasIng: [rIng, rCopec],
     filasCos,
-    vanLabel: `VAN (${VAN_RATE * 100}%) c/ tierra`,
+    vanLabel: `VAN (${(TASA_LIBRO * 100).toFixed(0)}%) c/ tierra`,
     tasaRef: `$B$${rTasa}`,
     tirLabel: "TIR c/ tierra (incl. factib. gastada)",
   });

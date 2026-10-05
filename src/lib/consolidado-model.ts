@@ -185,6 +185,9 @@ function repartir(serie: number[], claveB: number[], claveC: number[], audp: Aud
 export const TIERRA_AUDP = 343000; // AUDP_TIERRA_TOTAL del simulador
 const COMISION = 0.02;
 export const VAN_RATE = 0.08;
+/** Tasas que ofrece la lámina. El 8% es la del negocio inmobiliario; el 7%
+ *  era la de la sanitaria y se deja disponible para comparar. */
+export const TASAS = [0.08, 0.07] as const;
 export const VAN_RATE_SAN = 0.07; // la sanitaria se descuenta al 7%
 export const VENTA_SANITARIA = 147433;
 
@@ -218,6 +221,8 @@ export interface Unidad {
   flujoVan: number[]; // resultado económico: flujo futuro ± tierra devengada
   // indicadores
   van: number;
+  /** Tasa con la que se descontó el VAN. */
+  vanTasa: number;
   tir: number | null;
   capitalTrabajo: number;
   payback: number | null;
@@ -253,7 +258,7 @@ function permanentesDe(flujo: number[]): number {
   return last >= 0 && last + 1 < NY ? YEARS[last + 1] : YEARS[0];
 }
 
-export function computeConsolidado(audp: Audp = "ambos"): { inmobiliario: Unidad; fisico: Fisico } {
+export function computeConsolidado(audp: Audp = "ambos", tasa: number = VAN_RATE): { inmobiliario: Unidad; fisico: Fisico } {
   // Claves de reparto por AUDP (ver Criterios en la página):
   //  ingresos y equipamiento → venta de cada AUDP · infraestructura y
   //  mitigaciones → su propia serie por zona · mantención → hectáreas
@@ -344,7 +349,8 @@ export function computeConsolidado(audp: Audp = "ambos"): { inmobiliario: Unidad
     resultado: tRes,
     resultadoAcum: tResAcum,
     flujoVan: tVanFlow,
-    van: npvAt(tVanFlow, VAN_RATE),
+    van: npvAt(tVanFlow, tasa),
+    vanTasa: tasa,
     // la TIR corre desde hoy e incluye la factibilización gastada
     tir: tirDe(tVanFlow),
     capitalTrabajo: Math.abs(Math.min(...tResAcum, 0)),

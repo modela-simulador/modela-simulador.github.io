@@ -57,6 +57,14 @@ const primero = (a: number[]) => YEARS[a.findIndex((v) => v > 0.0005)];
 chk("primer año con hectáreas", primero(A.fisico.haAnual), 2031, 0);
 chk("primer año con viviendas", primero(A.fisico.vivAnual), 2031, 0);
 
+console.log("\n── tasa de descuento ──");
+const A7 = computeConsolidado("ambos", 0.07);
+chk("VAN al 8%", A.inmobiliario.van, 433903, 2);
+chk("VAN al 7%", A7.inmobiliario.van, 504047, 2);
+chk("bajar la tasa sube el VAN", A7.inmobiliario.van > A.inmobiliario.van ? 1 : 0, 1, 0);
+chk("la TIR no depende de la tasa", (A7.inmobiliario.tir ?? 0) - (A.inmobiliario.tir ?? 0), 0, 1e-9);
+chk("el resultado no depende de la tasa", A7.inmobiliario.totalResultado, A.inmobiliario.totalResultado, 0.5);
+
 console.log("\n── indicadores por AUDP ──");
 for (const [n, x] of [["Batuco", B], ["Colina", C], ["Ambos", A]] as const) {
   const c = x.inmobiliario;

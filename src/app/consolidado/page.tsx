@@ -8,6 +8,7 @@ import {
   computeConsolidado,
   PARIDAD_PLANILLAS,
   TIERRA_AUDP,
+  TASAS,
   VAN_RATE,
   YEARS,
   type Audp,
@@ -19,19 +20,20 @@ import {
 const nf = (n: number) => Math.round(Math.abs(n)).toLocaleString("es-CL");
 const sg = (n: number) => (n < -0.5 ? "−" : "") + nf(n);
 const uf = (n: number) => `${sg(n)} UF`;
-const tasa = (r: number) => `${(r * 100).toFixed(0)}%`;
+const tasa_ = (r: number) => `${(r * 100).toFixed(0)}%`;
 const pct = (n: number | null) => (n === null ? "—" : `${(n * 100).toFixed(1).replace(".", ",")}%`);
 const ha = (n: number) => (Math.abs(n) < 0.0005 ? "·" : n.toFixed(2).replace(".", ","));
 const un = (n: number) => (Math.abs(n) < 0.5 ? "·" : Math.round(n).toLocaleString("es-CL"));
 
 export default function ConsolidadoPage() {
   const [audp, setAudp] = useState<Audp>("ambos");
-  const { inmobiliario, fisico } = useMemo(() => computeConsolidado(audp), [audp]);
+  const [tasa, setTasa] = useState<number>(VAN_RATE);
+  const { inmobiliario, fisico } = useMemo(() => computeConsolidado(audp, tasa), [audp, tasa]);
   const [bajando, setBajando] = useState(false);
   const exportar = async () => {
     setBajando(true);
     try {
-      await descargarConsolidado([inmobiliario], audp);
+      await descargarConsolidado([inmobiliario], audp, tasa);
     } finally {
       setBajando(false);
     }
@@ -63,6 +65,20 @@ export default function ConsolidadoPage() {
                 }`}
               >
                 {k === "ambos" ? "Ambos" : k === "batuco" ? "Batuco" : "Colina"}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center rounded-md border border-zinc-700 overflow-hidden">
+            {TASAS.map((r) => (
+              <button
+                key={r}
+                onClick={() => setTasa(r)}
+                title={`Descontar al ${tasa_(r)}`}
+                className={`px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  tasa === r ? "bg-zinc-200 text-zinc-900" : "text-zinc-400 hover:text-white"
+                }`}
+              >
+                {tasa_(r)}
               </button>
             ))}
           </div>
@@ -124,14 +140,14 @@ function UnidadCard({ u, destacada }: { u: Unidad; destacada?: boolean }) {
       </div>
       <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
         <Kpi
-          label={`VAN ${tasa(VAN_RATE)} c/ tierra`}
+          label={`VAN ${tasa_(u.vanTasa ?? VAN_RATE)} c/ tierra`}
           value={uf(u.van)}
           color={u.van >= 0 ? "text-green-400" : "text-red-400"}
         />
         <Kpi
           label="TIR c/ tierra"
           value={pct(u.tir)}
-          color={(u.tir ?? 0) >= VAN_RATE ? "text-green-400" : "text-red-400"}
+          color={(u.tir ?? 0) >= (u.vanTasa ?? VAN_RATE) ? "text-green-400" : "text-red-400"}
         />
         <Kpi label="Capital de Trabajo" value={uf(-u.capitalTrabajo)} color="text-red-400" />
         <Kpi label="Payback" value={String(u.payback ?? "—")} color="text-amber-400" />
@@ -442,8 +458,9 @@ function Criterios() {
         <span className="text-zinc-300 font-semibold">Capital de trabajo:</span> el valle del resultado acumulado.
       </p>
       <p>
-        <span className="text-zinc-300 font-semibold">Tasas y TIR:</span> la TIR corre desde 2026 y el VAN descuenta al
-        {" "}{tasa(VAN_RATE)}. La factibilización ya gastada no se carga por ser costo hundido: solo corre la que queda
+        <span className="text-zinc-300 font-semibold">Tasas y TIR:</span> la TIR corre desde 2026 y el VAN descuenta a
+        la tasa elegida arriba. El 8% es la del negocio inmobiliario; el 7% era la de la sanitaria y queda disponible
+        para comparar. La factibilización ya gastada no se carga por ser costo hundido: solo corre la que queda
         por gastar. La etapa 6 de la planta cierra completa en 2041.
       </p>
     </div>
