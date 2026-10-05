@@ -145,8 +145,13 @@ export interface ResidualInputs {
   // su preventa arranca antes para calzar con traslape deseado contra etapa 1.
   // Durante meses donde AMBAS etapas venden activamente, la velocidad total se
   // canibaliza: 2 etapas = 1.35× baseVelocity (cada una recibe 0.675×).
-  numEtapas: 1 | 2;
-  etapaOverlapMonths: number;  // meses de traslape obra E1-E2 (default 4)
+  /** Número de etapas consecutivas, de 1 a 7. Cada una construye en
+   *  `constructionMonths` (el plazo de obra es SIEMPRE por etapa). */
+  numEtapas: number;
+  etapaOverlapMonths: number;  // meses de traslape de obra entre etapas sucesivas
+  /** Plusvalía anual del precio de venta. 0.02 = 2% al año. El precio al que
+   *  se promete una unidad crece (1+p)^(mes/12) desde el mes 0. */
+  plusvaliaAnualPct: number;
 
   // Crédito de Enlace (subsidio gobierno DS19): préstamo sin interés durante obra,
   // repagado proporcional a escrituraciones post-recepción. Mejora TIR reduciendo
@@ -479,7 +484,8 @@ export const DEFAULT_INPUTS: Omit<ResidualInputs, 'lotAreaM2' | 'lotFid' | 'prod
   constructionFinancingPct: 0,             // 0 = activo puro; 1.0 = 100% financiado
   interestRateAnnual: 0.045,
   numEtapas: 1,                            // default: una sola etapa (comportamiento clásico)
-  etapaOverlapMonths: 4,                   // 4 meses de traslape obra cuando numEtapas = 2
+  etapaOverlapMonths: 4,                   // meses de traslape de obra entre etapas sucesivas
+  plusvaliaAnualPct: 0,                    // default 0: sin plusvalía (comportamiento clásico)
   creditoEnlaceOn: false,                  // OFF por default; DS19 lo activa automáticamente
   creditoEnlaceUFPerUnit: 300,             // 300 UF/viv típico Chile DS19
   constructionAdvancePct: 0.20,            // 20% anticipo al contratista

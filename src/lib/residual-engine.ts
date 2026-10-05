@@ -476,6 +476,12 @@ export function buildCashFlow(
         escriMonth = monthEscrituracionInt + backlogOffset + serviuLag;
       }
 
+      // ── PLUSVALÍA ──
+      // El precio al que se promete crece (1+p)^(mes/12) desde el mes 0. Con
+      // plusvaliaAnualPct = 0 vale 1 y el resultado es idéntico al de siempre.
+      const precioUnidadMes =
+        revenuePerUnit * Math.pow(1 + (inputs.plusvaliaAnualPct ?? 0), m / 12);
+
       // ── PIE y ESCRITURACIÓN ──
       // Stock post-recepción: el banco aprueba mutuo inmediato → 100% al escriturar
       // (no hay cuotas de PIE porque el edificio está recibido).
@@ -484,12 +490,12 @@ export function buildCashFlow(
       if (isStockPostRecep) {
         escrituracionSchedule.push({
           month: escriMonth,
-          amount: canSell * revenuePerUnit,  // 100% neto en un solo pago
+          amount: canSell * precioUnidadMes,  // 100% neto en un solo pago
           units: canSell,
         });
       } else {
         // PIE distribuido entre m+1 y escriMonth-1 (ambos inclusive)
-        const piePerUnit = revenuePerUnit * piePct;
+        const piePerUnit = precioUnidadMes * piePct;
         const nCuotas = Math.max(1, escriMonth - m - 1);
         const pieMonthly = piePerUnit / nCuotas;
         for (let pm = 0; pm < nCuotas; pm++) {
@@ -499,7 +505,7 @@ export function buildCashFlow(
           });
         }
         // Escrituración: 85% restante
-        const escriAmount = canSell * revenuePerUnit * escrituracionCollectionPct;
+        const escriAmount = canSell * precioUnidadMes * escrituracionCollectionPct;
         escrituracionSchedule.push({
           month: escriMonth,
           amount: escriAmount,
@@ -1088,114 +1094,88 @@ export function buildMultiEtapaCashFlow(
     return buildCashFlow(inputs, landPriceUFm2);
   }
 
-  // División simétrica: 2 etapas iguales (redondeo hacia abajo, el residuo se
-  // adjunta a etapa 2 para no perder unidades).
-  const unitsE1 = Math.floor(inputs.totalUnits / 2);
-  const unitsE2 = inputs.totalUnits - unitsE1;
-  const supConstE1 = inputs.totalSupConstruidaM2 * (unitsE1 / inputs.totalUnits);
-  const supConstE2 = inputs.totalSupConstruidaM2 - supConstE1;
-  const supVendE1 = inputs.totalSupVendibleM2 * (unitsE1 / inputs.totalUnits);
-  const supVendE2 = inputs.totalSupVendibleM2 - supVendE1;
+  // ── N etapas consecutivas (1 a 7) ──
+  // El proyecto se parte en N partes iguales (el residuo va a la última, para
+  // no perder unidades). Cada etapa construye en `constructionMonths`: el plazo
+  // de obra es SIEMPRE por etapa, no del proyecto completo.
+  //
+  // Calendario: la etapa k+1 arranca obra `constructionMonths - overlap` meses
+  // después que la k, y su preventa empieza lo justo antes para llegar con el
+  // % de preventa exigido. Con N=2 esto reproduce exactamente el cálculo
+  // anterior, así que /residual no se mueve.
+  const N = Math.max(1, Math.min(7, Math.round(inputs.numEtapas)));
   const baseVel = inputs.salesVelocity;
-  const canibVel = baseVel * cannibalizationFactor(2) / 2;  // 0.675 × base
+  const canibVel = baseVel * cannibalizationFactor(N) / N;
 
-  // Ambas etapas venden a velocidad canibalizada. Simplificación de v1:
-  // el momento solo (etapa 1 sin etapa 2) también va canibalizado → subestima
-  // ligeramente la caja en los primeros meses, pero es conservador.
-  const etapaCommon: Partial<ResidualInputs> = {
-    numEtapas: 1,  // recursion safety
-    salesVelocity: canibVel,
-  };
-
-  // Cada etapa toma su porción proporcional del lote para que los costos
-  // basados en lotAreaM2 (mov. tierra edificios, urbanización casas) NO se
-  // dupliquen al construir 2 cash flows independientes. El terreno total
-  // pagado se mantiene = landPrice × lotAreaM2 completo (suma de las dos partes).
-  const propE1 = unitsE1 / inputs.totalUnits;
-  const propE2 = unitsE2 / inputs.totalUnits;
-  const lotE1 = inputs.lotAreaM2 * propE1;
-  const lotE2 = inputs.lotAreaM2 * propE2;
-
-  // Costos PROYECTO-FIJOS (no se duplican entre etapas porque es el mismo equipo):
-  //   - Gastos generales (gerente de obra, supervisión): UN solo equipo gerencia
-  //     ambas torres. Total proyecto = constructionMonths × indirectCostsUFMonth
-  //     (igual que 1 etapa). Se reparte 50/50 entre las etapas.
-  //   - Tarifa gestión inmobiliaria, post-venta, marketing: similar (% de ventas
-  //     pero el TEAM es uno solo; la fracción que aporta a costos fijos se comparte).
-  // El factor de overlap solo aplica a la PORCIÓN team-fija; la parte transaccional
-  // sigue per-etapa (cada SoP genera su comisión, cada venta su escrituración, etc.).
-  const indirectPerEtapa = inputs.indirectCostsUFMonth / 2;  // mismo gerente, costo total invariante
-
-  // Etapa 1 — lleva su porción del terreno y contribuciones, + 50% del equipo
-  const e1Inputs: ResidualInputs = {
-    ...inputs,
-    ...etapaCommon,
-    totalUnits: unitsE1,
-    totalSupConstruidaM2: supConstE1,
-    totalSupVendibleM2: supVendE1,
-    lotAreaM2: lotE1,
-    landContributionsUF: inputs.landContributionsUF * propE1,
-    landBrokerageUF: inputs.landBrokerageUF * propE1,
-    indirectCostsUFMonth: indirectPerEtapa,  // 50% del gerente
-    unitModels: inputs.unitModels.map(m => ({
-      ...m,
-      count: unitsE1,
-      parkingCount: Math.round(m.parkingCount * unitsE1 / inputs.totalUnits),
-    })),
-  };
-  const e1 = buildCashFlow(e1Inputs, landPriceUFm2);
-
-  // Cálculo del desfase de etapa 2:
-  //   icE1 = monthPreSalesStart + ceil(unitsE1 * preventaPct / canibVel)
-  //   icE2_target = icE1 + constructionMonths - overlapMonths
-  //   preventaTimeE2 = ceil(unitsE2 * preventaPct / canibVel)
-  //   preSalesStart_E2 = icE2_target - preventaTimeE2
-  const preventaE1Units = unitsE1 * inputs.preventasBeforeConstructionPct;
-  const preventaE2Units = unitsE2 * inputs.preventasBeforeConstructionPct;
-  const icE1 = inputs.autoConstructionStart
-    ? inputs.monthPreSalesStart + Math.ceil(preventaE1Units / Math.max(0.1, canibVel))
-    : inputs.monthConstructionStart;
-  const icE2Target = icE1 + inputs.constructionMonths - inputs.etapaOverlapMonths;
-  const preventaTimeE2 = Math.ceil(preventaE2Units / Math.max(0.1, canibVel));
-  const preSalesStartE2 = Math.max(inputs.monthPreSalesStart, icE2Target - preventaTimeE2);
-
-  // Etapa 2 — sin terreno, sin contribuciones, mismo team compartido
-  // El GAV % equipo inmobiliario se reduce por traslape (un team gerencia ambas)
+  // Costos de equipo (gerencia de obra) : un solo equipo gerencia todas las
+  // etapas, así que el costo mensual total del proyecto no se multiplica.
+  const indirectPerEtapa = inputs.indirectCostsUFMonth / N;
+  // El GAV del equipo inmobiliario se comparte durante el traslape.
   const overlapFactor = Math.max(0, 1 - inputs.etapaOverlapMonths / inputs.constructionMonths);
-  const e2Inputs: ResidualInputs = {
-    ...inputs,
-    ...etapaCommon,
-    totalUnits: unitsE2,
-    totalSupConstruidaM2: supConstE2,
-    totalSupVendibleM2: supVendE2,
-    lotAreaM2: lotE2,
-    landContributionsUF: inputs.landContributionsUF * propE2,
-    landBrokerageUF: inputs.landBrokerageUF * propE2,
-    unitModels: inputs.unitModels.map(m => ({
-      ...m,
-      count: unitsE2,
-      parkingCount: Math.round(m.parkingCount * unitsE2 / inputs.totalUnits),
-    })),
-    monthPreSalesStart: preSalesStartE2,
-    indirectCostsUFMonth: indirectPerEtapa,  // 50% del gerente — total proyecto = 1 etapa
-    // GAV equipo inmobiliario compartido durante traslape (% sobre revenue, igual)
-    tarifaGestionInmobiliariaPct: inputs.tarifaGestionInmobiliariaPct * overlapFactor,
-    postVentaGavPct: inputs.postVentaGavPct * overlapFactor,
-    marketingPct: inputs.marketingPct * overlapFactor,
-  };
-  // E2 paga su porción del terreno (mismo landPriceUFm2). Total terreno = E1 + E2 = full lot.
-  const e2 = buildCashFlow(e2Inputs, landPriceUFm2);
+
+  const unitsBase = Math.floor(inputs.totalUnits / N);
+  const flujos: MonthlyCashFlowRow[][] = [];
+  let icPrev = 0;
+
+  for (let k = 0; k < N; k++) {
+    const esUltima = k === N - 1;
+    const unitsK = esUltima ? inputs.totalUnits - unitsBase * (N - 1) : unitsBase;
+    const prop = unitsK / inputs.totalUnits;
+
+    // Mes de inicio de obra de esta etapa y preventa que lo habilita
+    const preventaUnitsK = unitsK * inputs.preventasBeforeConstructionPct;
+    const preventaTimeK = Math.ceil(preventaUnitsK / Math.max(0.1, canibVel));
+    let preSalesStartK = inputs.monthPreSalesStart;
+    if (k === 0) {
+      icPrev = inputs.autoConstructionStart
+        ? inputs.monthPreSalesStart + preventaTimeK
+        : inputs.monthConstructionStart;
+    } else {
+      const icTargetK = icPrev + inputs.constructionMonths - inputs.etapaOverlapMonths;
+      preSalesStartK = Math.max(inputs.monthPreSalesStart, icTargetK - preventaTimeK);
+      icPrev = icTargetK;
+    }
+
+    const inputsK: ResidualInputs = {
+      ...inputs,
+      numEtapas: 1, // recursion safety
+      salesVelocity: canibVel,
+      totalUnits: unitsK,
+      totalSupConstruidaM2: inputs.totalSupConstruidaM2 * prop,
+      totalSupVendibleM2: inputs.totalSupVendibleM2 * prop,
+      lotAreaM2: inputs.lotAreaM2 * prop,
+      landContributionsUF: inputs.landContributionsUF * prop,
+      landBrokerageUF: inputs.landBrokerageUF * prop,
+      indirectCostsUFMonth: indirectPerEtapa,
+      monthPreSalesStart: preSalesStartK,
+      unitModels: inputs.unitModels.map((m) => ({
+        ...m,
+        count: unitsK,
+        parkingCount: Math.round((m.parkingCount * unitsK) / inputs.totalUnits),
+      })),
+      // la primera etapa corre sola al principio: no comparte GAV todavía
+      ...(k === 0
+        ? {}
+        : {
+            tarifaGestionInmobiliariaPct: inputs.tarifaGestionInmobiliariaPct * overlapFactor,
+            postVentaGavPct: inputs.postVentaGavPct * overlapFactor,
+            marketingPct: inputs.marketingPct * overlapFactor,
+          }),
+    };
+    flujos.push(buildCashFlow(inputsK, landPriceUFm2));
+  }
 
   // Fusionar mes a mes
-  const maxLen = Math.max(e1.length, e2.length);
+  const maxLen = Math.max(...flujos.map((f) => f.length));
   const merged: MonthlyCashFlowRow[] = [];
   let cumCF = 0, cumCFLev = 0;
   for (let m = 0; m < maxLen; m++) {
-    const r1 = e1[m] || emptyCashFlowRow(m);
-    const r2 = e2[m] || emptyCashFlowRow(m);
-    const row = mergeCashFlowRows(r1, r2);
+    let row = flujos[0][m] || emptyCashFlowRow(m);
+    for (let k = 1; k < flujos.length; k++) {
+      row = mergeCashFlowRows(row, flujos[k][m] || emptyCashFlowRow(m));
+    }
     row.month = m;
-    row.date = r1.date || r2.date || '';
+    row.date = flujos.map((f) => f[m]?.date).find(Boolean) || '';
     cumCF += row.netCashFlow;
     cumCFLev += row.netCashFlowLevered;
     row.cumulativeCashFlow = cumCF;

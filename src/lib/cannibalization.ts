@@ -12,28 +12,18 @@
  *   factor(1) = 1.00  (1 etapa: vende n unidades)
  *   factor(2) = 1.35  (2 etapas: entre ambas venden 1.35n, no 2n)
  *
- * Faltan factor(3) y factor(4). El usuario define estos dos valores según
- * su know-how del mercado (datos empíricos o criterio profesional).
+ * De 3 a 7 la curva se extiende manteniendo las dos propiedades que pidió el
+ * negocio: cóncava (cada etapa extra suma menos) y factor(n)/n decreciente
+ * (abrir más etapas baja la velocidad de cada una). Son supuestos, no dato
+ * duro: si aparece evidencia de mercado, se ajusta la tabla.
  */
 
 export function cannibalizationFactor(nActiveEtapas: number): number {
-  // TODO: define tus factores para 3 y 4 etapas activas simultáneamente.
-  //
-  // Consideraciones:
-  //  - La curva debe ser cóncava (diminishing returns)
-  //  - factor(n) / n debe ser decreciente (vender en más etapas baja la velocidad de cada una)
-  //  - Empíricamente: el límite de absorción del mercado local rara vez sube >2x de
-  //    lo que una etapa única puede vender
-  //  - Dos sub-opciones típicas en la literatura inmobiliaria chilena:
-  //      (a) factor(3)=1.55, factor(4)=1.70  — canibalización fuerte
-  //      (b) factor(3)=1.60, factor(4)=1.80  — canibalización moderada
-  //
-  // Reemplaza los "? ? ?" con tus valores.
   if (nActiveEtapas <= 0) return 0;
-  if (nActiveEtapas === 1) return 1.0;
-  if (nActiveEtapas === 2) return 1.35;
-  if (nActiveEtapas === 3) return /* TODO: tu valor, ej 1.55 */ 1.55;
-  if (nActiveEtapas === 4) return /* TODO: tu valor, ej 1.70 */ 1.70;
-  // Más de 4: extrapolación log (para evitar crashes; realmente no usado)
-  return 1.7 + 0.1 * Math.log2(nActiveEtapas / 4);
+  // Dato del fundador: factor(1)=1.00 y factor(2)=1.35. De ahí en adelante la
+  // curva sigue cóncava — el mercado local absorbe cada vez menos por etapa.
+  const TABLA = [0, 1.0, 1.35, 1.55, 1.7, 1.82, 1.92, 2.0];
+  if (nActiveEtapas < TABLA.length) return TABLA[nActiveEtapas];
+  // Por sobre la tabla, extrapolación logarítmica suave (no debería usarse).
+  return 2.0 + 0.08 * Math.log2(nActiveEtapas / 7);
 }
