@@ -19,5 +19,13 @@ run("rm -rf /tmp/main-src");
 run("git clone --depth 1 --branch main https://github.com/modela-simulador/modela-simulador.github.io.git /tmp/main-src");
 // main gana (es el mundo que se edita aparte); /conectividad no existe en main,
 // así que el export lo conserva intacto. Se excluye lo que no es sitio.
-run("rsync -a --exclude '.git' --exclude '.github' --exclude 'CLAUDE.md' /tmp/main-src/ out/");
-console.log("[merge-main] main fusionado sobre out/ (main gana; /conectividad intacto).");
+//
+// index.html NO se pisa: el de main es un redirect de abril a simulador.html y
+// tapaba el hub de herramientas (login + tarjetas de cabidas, valorización de
+// suelo, consolidado, integración y conectividad), que es lo que debe recibir
+// a quien entra a la raíz. El simulador sigue en /simulador.html y el hub lo
+// enlaza.
+run(
+  "rsync -a --exclude '.git' --exclude '.github' --exclude 'CLAUDE.md' --exclude 'index.html' /tmp/main-src/ out/",
+);
+console.log("[merge-main] main fusionado sobre out/ (main gana salvo index.html; hub y /conectividad intactos).");
