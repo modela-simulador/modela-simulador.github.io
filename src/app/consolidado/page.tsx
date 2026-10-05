@@ -4,18 +4,15 @@ import { Fragment, useMemo, useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import { descargarConsolidado } from "@/lib/consolidado-export";
 import {
-  acum,
   AUDP_LABEL,
-  HA_TOTAL_DE,
   computeConsolidado,
-  HECTAREAS,
   PARIDAD_PLANILLAS,
   TIERRA_AUDP,
   VAN_RATE,
   VAN_RATE_SAN,
-  VIVIENDAS,
   YEARS,
   type Audp,
+  type Fisico,
   type Unidad,
 } from "@/lib/consolidado-model";
 
@@ -30,14 +27,8 @@ const un = (n: number) => (Math.abs(n) < 0.5 ? "·" : Math.round(n).toLocaleStri
 
 export default function ConsolidadoPage() {
   const [audp, setAudp] = useState<Audp>("ambos");
-  const { tierra, sanitaria, consolidado } = useMemo(() => computeConsolidado(audp), [audp]);
+  const { tierra, sanitaria, consolidado, fisico } = useMemo(() => computeConsolidado(audp), [audp]);
   const unidades = [tierra, sanitaria, consolidado];
-  const fisico = useMemo(() => {
-    const h = HECTAREAS[audp], v = VIVIENDAS[audp];
-    // el total viene de las constantes del proyecto: la serie anual redondea
-    // a 3 decimales y perdería 0,006 ha al sumarse
-    return { haAnual: h, haAcum: acum(h), vivAnual: v, vivAcum: acum(v), haTot: HA_TOTAL_DE[audp], vivTot: acum(v)[v.length - 1] };
-  }, [audp]);
   const [bajando, setBajando] = useState(false);
   const exportar = async () => {
     setBajando(true);
@@ -164,15 +155,6 @@ function Kpi({ label, value, color }: { label: string; value: string; color: str
       <div className={`text-[13px] font-bold tabular-nums ${color}`}>{value}</div>
     </div>
   );
-}
-
-interface Fisico {
-  haAnual: number[];
-  haAcum: number[];
-  vivAnual: number[];
-  vivAcum: number[];
-  haTot: number;
-  vivTot: number;
 }
 
 // ── superficie y viviendas vendidas ──────────────────────────

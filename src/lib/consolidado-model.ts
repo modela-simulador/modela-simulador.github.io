@@ -114,16 +114,56 @@ export const AUDP_LABEL: Record<Audp, string> = {
   colina: "AUDP Colina",
 };
 
-export const HECTAREAS: Record<Audp, number[]> = {
-  batuco: HA_B,
-  colina: HA_C,
-  ambos: addv(HA_B, HA_C),
+/** Viviendas totales por AUDP (recepciones de la planilla Solo AUDP). */
+export const VIV_TOTAL = { batuco: 1906, colina: 2444 } as const;
+export const VIV_TOTAL_DE: Record<Audp, number> = {
+  batuco: VIV_TOTAL.batuco,
+  colina: VIV_TOTAL.colina,
+  ambos: VIV_TOTAL.batuco + VIV_TOTAL.colina,
 };
-export const VIVIENDAS: Record<Audp, number[]> = {
-  batuco: VIV_B,
-  colina: VIV_C,
-  ambos: addv(VIV_B, VIV_C),
-};
+
+export interface Fisico {
+  haAnual: number[];
+  haAcum: number[];
+  vivAnual: number[];
+  vivAcum: number[];
+  haTot: number;
+  vivTot: number;
+}
+
+/** Reparte un total entero con el método del resto mayor: la suma no se mueve. */
+function enteros(total: number, pesos: number[]): number[] {
+  const base = suma(pesos);
+  if (base <= 0) return pesos.map(() => 0);
+  const exacto = pesos.map((w) => (total * w) / base);
+  const out = exacto.map((v) => Math.floor(v));
+  let resto = total - suma(out);
+  const orden = exacto
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => b.frac - a.frac);
+  for (let k = 0; k < orden.length && resto > 0; k++, resto--) out[orden[k].i]++;
+  return out;
+}
+
+/**
+ * Hectáreas y viviendas vendidas siguiendo la curva de venta de suelo de esta
+ * misma página (el ingreso sin COPEC). Así arrancan en 2031 con el primer
+ * macrolote y no en 2029, y los totales quedan clavados en los del proyecto:
+ * 16,51 + 23,47 ha y 1.906 + 2.444 viviendas.
+ */
+function fisicoDe(ingSuelo: number[], haTot: number, vivTot: number): Fisico {
+  const base = suma(ingSuelo);
+  const haAnual = base > 0 ? ingSuelo.map((v) => (haTot * v) / base) : ingSuelo.map(() => 0);
+  const vivAnual = enteros(vivTot, ingSuelo);
+  return {
+    haAnual,
+    haAcum: acum(haAnual),
+    vivAnual,
+    vivAcum: acum(vivAnual),
+    haTot,
+    vivTot,
+  };
+}
 
 /**
  * Reparte una serie entre las dos AUDP usando una clave año a año. Donde la
@@ -213,7 +253,7 @@ function permanentesDe(flujo: number[]): number {
   return last >= 0 && last + 1 < NY ? YEARS[last + 1] : YEARS[0];
 }
 
-export function computeConsolidado(audp: Audp = "ambos"): { tierra: Unidad; sanitaria: Unidad; consolidado: Unidad } {
+export function computeConsolidado(audp: Audp = "ambos"): { tierra: Unidad; sanitaria: Unidad; consolidado: Unidad; fisico: Fisico } {
   // Claves de reparto por AUDP (ver Criterios en la página):
   //  ingresos y equipamiento → venta de cada AUDP · infraestructura y
   //  mitigaciones → su propia serie por zona · mantención → hectáreas
@@ -400,7 +440,10 @@ export function computeConsolidado(audp: Audp = "ambos"): { tierra: Unidad; sani
     totalResultado: suma(cRes),
   };
 
-  return { tierra, sanitaria, consolidado };
+  // ── venta física, con la curva de venta de suelo de esta vista ──
+  const fisico = fisicoDe(ingSinCopec, HA_TOTAL_DE[audp], VIV_TOTAL_DE[audp]);
+
+  return { tierra, sanitaria, consolidado, fisico };
 }
 
 /**

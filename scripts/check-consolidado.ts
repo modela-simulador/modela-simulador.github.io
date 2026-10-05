@@ -5,7 +5,7 @@
 //  1. Batuco + Colina = Ambos, año a año y en los totales (incluido el VAN).
 //  2. El modo Ambos sigue calzando con las planillas del simulador.
 //  3. Las hectáreas y las viviendas cuadran con las constantes del proyecto.
-import { computeConsolidado, HECTAREAS, VIVIENDAS, PARIDAD_PLANILLAS, YEARS } from "@/lib/consolidado-model";
+import { computeConsolidado, PARIDAD_PLANILLAS, YEARS } from "@/lib/consolidado-model";
 
 const A = computeConsolidado("ambos");
 const B = computeConsolidado("batuco");
@@ -57,12 +57,19 @@ chk("Resultado Sanitaria", A.sanitaria.totalResultado, PARIDAD_PLANILLAS.resulta
 
 console.log("\n── hectáreas y viviendas ──");
 const s = (a: number[]) => a.reduce((x, y) => x + y, 0);
-chk("ha Batuco", s(HECTAREAS.batuco), 16.51, 0.01);
-chk("ha Colina", s(HECTAREAS.colina), 23.47, 0.01);
-chk("ha ambos", s(HECTAREAS.ambos), 39.98, 0.01);
-chk("viviendas Batuco", s(VIVIENDAS.batuco), 1906, 0);
-chk("viviendas Colina", s(VIVIENDAS.colina), 2444, 0);
-chk("viviendas ambos", s(VIVIENDAS.ambos), 4350, 0);
+chk("ha Batuco", s(B.fisico.haAnual), 16.51, 0.001);
+chk("ha Colina", s(C.fisico.haAnual), 23.47, 0.001);
+chk("ha ambos", s(A.fisico.haAnual), 39.98, 0.001);
+chk("viviendas Batuco", s(B.fisico.vivAnual), 1906, 0);
+chk("viviendas Colina", s(C.fisico.vivAnual), 2444, 0);
+chk("viviendas ambos", s(A.fisico.vivAnual), 4350, 0);
+chk("Batuco + Colina = ambos · ha", s(B.fisico.haAnual) + s(C.fisico.haAnual), s(A.fisico.haAnual), 0.001);
+chk("Batuco + Colina = ambos · viviendas", s(B.fisico.vivAnual) + s(C.fisico.vivAnual), s(A.fisico.vivAnual), 0);
+
+// nada puede venderse antes del primer macrolote
+const primero = (a: number[]) => YEARS[a.findIndex((v) => v > 0.0005)];
+chk("primer año con hectáreas", primero(A.fisico.haAnual), 2031, 0);
+chk("primer año con viviendas", primero(A.fisico.vivAnual), 2031, 0);
 
 console.log("\n── indicadores por AUDP ──");
 for (const [n, x] of [["Batuco", B], ["Colina", C], ["Ambos", A]] as const) {
