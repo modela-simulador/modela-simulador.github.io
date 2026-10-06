@@ -287,11 +287,11 @@ function permanentesDe(flujo: number[]): number {
 // interior y áreas verdes. Fuera: infraestructura, mantención y seguridad,
 // terreno COPEC y equipamiento comercial. Siguen a cargo del dueño la
 // factibilización, las mitigaciones y las inversiones sanitarias.
-// Precio: punto medio de los rangos conversados — casas y townhouses
-// 0,75–1 UF/m² y edificios 2–3 UF/m² (de 4,5–6 UF/m² como lote individual).
+// Precio fijado por el Directorio (2026-10-06): casas y townhouses 1 UF/m²
+// (rango 0,75–1) y edificios 2,75 UF/m² (rango 2–3, de 4,5–6 UF/m² como lote individual).
 // Mezcla casas/edificios por hectáreas, con las viviendas máximas del
 // simulador (los DS19 son edificio) a 40 casas/ha y 145 deptos/ha.
-export const MACRO_PRECIO = { C: 0.875, E: 2.5 } as const; // UF/m² bruto
+export const MACRO_PRECIO = { C: 1, E: 2.75 } as const; // UF/m² bruto
 export const MACRO_INICIO = 2031; // mismo año del primer macrolote del plan base
 export const MACRO_AUDP = {
   batuco: { ha: 31.8, orden: "ECECE" }, // 5 macrolotes de 6,36 ha: 2 casas · 3 edificios
