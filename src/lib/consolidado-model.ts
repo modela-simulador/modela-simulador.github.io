@@ -173,6 +173,11 @@ function fisicoDe(ingSuelo: number[], haTot: number, vivTot: number): Fisico {
   };
 }
 
+/** Venta física de los macrolotes: hectáreas brutas y viviendas que caben en ellas. */
+function fisicoMacro(haAnual: number[], vivAnual: number[]): Fisico {
+  return { haAnual, haAcum: acum(haAnual), vivAnual, vivAcum: acum(vivAnual), haTot: suma(haAnual), vivTot: suma(vivAnual) };
+}
+
 /**
  * Reparte una serie entre las dos AUDP usando una clave año a año. Donde la
  * clave no tiene masa ese año (p. ej. un costo que corre en años sin venta),
@@ -246,6 +251,16 @@ function npvAt(flow: number[], rate: number) {
 function tirDe(flow: number[]): number | null {
   if (!flow.some((v) => v < 0) || !flow.some((v) => v > 0)) return null;
   let lo = -0.99, hi = 10.0;
+  // Con costos que siguen después de la última venta (macrolotes) el flujo
+  // cambia de signo más de una vez y a tasas muy negativas el VAN vuelve a
+  // caer: se acota el tramo a la raíz más alta, la TIR económica.
+  if (npvAt(flow, lo) <= 0) {
+    let r = hi;
+    while (r > -0.9 && npvAt(flow, r) <= 0) r -= 0.01;
+    if (npvAt(flow, r) <= 0) return null;
+    lo = r;
+    hi = r + 0.01;
+  }
   for (let k = 0; k < 200; k++) {
     const mid = (lo + hi) / 2;
     if (npvAt(flow, mid) > 0) lo = mid;
@@ -266,7 +281,51 @@ function permanentesDe(flujo: number[]): number {
   return last >= 0 && last + 1 < NY ? YEARS[last + 1] : YEARS[0];
 }
 
-export function computeConsolidado(audp: Audp = "ambos", tasa: number = VAN_RATE, alcance: Alcance = "inmobiliario"): { inmobiliario: Unidad; fisico: Fisico } {
+// ── ESCENARIO MACROLOTES ─────────────────────────────────────
+// El dueño de la tierra vende la superficie BRUTA en macrolotes de 5 a 7 ha,
+// uno por año en cada AUDP, y el desarrollador asume vialidades, urbanización
+// interior y áreas verdes. Fuera: infraestructura, mantención y seguridad,
+// terreno COPEC y equipamiento comercial. Siguen a cargo del dueño la
+// factibilización, las mitigaciones y las inversiones sanitarias.
+// Precio: punto medio de los rangos conversados — casas y townhouses
+// 0,75–1 UF/m² y edificios 2–3 UF/m² (de 4,5–6 UF/m² como lote individual).
+// Mezcla casas/edificios por hectáreas, con las viviendas máximas del
+// simulador (los DS19 son edificio) a 40 casas/ha y 145 deptos/ha.
+export const MACRO_PRECIO = { C: 0.875, E: 2.5 } as const; // UF/m² bruto
+export const MACRO_INICIO = 2031; // mismo año del primer macrolote del plan base
+export const MACRO_AUDP = {
+  batuco: { ha: 31.8, orden: "ECECE" }, // 5 macrolotes de 6,36 ha: 2 casas · 3 edificios
+  colina: { ha: 44.46, orden: "ECECECE" }, // 7 macrolotes de 6,35 ha: 3 casas · 4 edificios
+} as const;
+const MACRO_DENS = { C: 40, E: 145 } as const; // viviendas por ha, solo para repartir las viviendas
+
+function macroSerie(z: "batuco" | "colina") {
+  const { ha, orden } = MACRO_AUDP[z];
+  const haLote = ha / orden.length;
+  const casas = new Array(NY).fill(0), edif = new Array(NY).fill(0), haArr = new Array(NY).fill(0), peso = new Array(NY).fill(0);
+  [...orden].forEach((t, k) => {
+    const i = iy(MACRO_INICIO + k);
+    const v = haLote * 10000 * MACRO_PRECIO[t as "C" | "E"];
+    if (t === "C") casas[i] += v;
+    else edif[i] += v;
+    haArr[i] += haLote;
+    peso[i] += haLote * MACRO_DENS[t as "C" | "E"];
+  });
+  return { casas, edif, ing: addv(casas, edif), ha: haArr, viv: enteros(VIV_TOTAL[z], peso) };
+}
+
+export const MACRO_HA_DE: Record<Audp, number> = {
+  batuco: MACRO_AUDP.batuco.ha,
+  colina: MACRO_AUDP.colina.ha,
+  ambos: MACRO_AUDP.batuco.ha + MACRO_AUDP.colina.ha,
+};
+
+export function computeConsolidado(
+  audp: Audp = "ambos",
+  tasa: number = VAN_RATE,
+  alcance: Alcance = "inmobiliario",
+  macrolotes = false,
+): { inmobiliario: Unidad; fisico: Fisico } {
   // Claves de reparto por AUDP (ver Criterios en la página):
   //  ingresos y equipamiento → venta de cada AUDP · infraestructura y
   //  mitigaciones → su propia serie por zona · mantención → hectáreas
@@ -276,16 +335,19 @@ export function computeConsolidado(audp: Audp = "ambos", tasa: number = VAN_RATE
   const HA_ACUM_B = acum(HA_B), HA_ACUM_C = acum(HA_C);
 
   // ── unidad TIERRA ──
-  const ingTierra = rep(fusion(SEM.ingresos, AN_T.ingresos), ING_B, ING_C);
-  const infra = rep(fusion(SEM.infra, AN_T.infra), INFRA_B, INFRA_C);
+  const mB = macroSerie("batuco"), mC = macroSerie("colina");
+  const elegir = (b: number[], c: number[]) => (audp === "batuco" ? b : audp === "colina" ? c : addv(b, c));
+  const ceros = YEARS.map(() => 0);
+  const ingTierra = macrolotes ? elegir(mB.ing, mC.ing) : rep(fusion(SEM.ingresos, AN_T.ingresos), ING_B, ING_C);
+  const infra = macrolotes ? ceros : rep(fusion(SEM.infra, AN_T.infra), INFRA_B, INFRA_C);
   const mitig = rep(fusion(SEM.mitigaciones, AN_T.mitigaciones), MITIG_B, MITIG_C);
-  const mant = rep(fusion(SEM.mantencion, AN_T.mantencion), HA_ACUM_B, HA_ACUM_C);
+  const mant = macrolotes ? ceros : rep(fusion(SEM.mantencion, AN_T.mantencion), HA_ACUM_B, HA_ACUM_C);
   const sanInv = rep(fusion(SEM.sanitariaInv, AN_T.sanitariaInv), VIV_B, VIV_C);
   const comercializacion = ingTierra.map((v) => -COMISION * v);
-  const equip = rep(SEM.equipamiento, ING_B, ING_C);
+  const equip = macrolotes ? ceros : rep(SEM.equipamiento, ING_B, ING_C);
 
   // COPEC es la venta de un terreno aparte: línea propia, fuera del devengo de tierra
-  const copec = rep(serie({ 2030: 30000 }), ING_B, ING_C);
+  const copec = macrolotes ? ceros : rep(serie({ 2030: 30000 }), ING_B, ING_C);
   const ingSinCopec = addv(ingTierra, copec.map((v) => -v));
   // serie total (sin filtrar) para devengar la tierra de cada AUDP
   const ingSinCopecTotal = addv(
@@ -301,8 +363,8 @@ export function computeConsolidado(audp: Audp = "ambos", tasa: number = VAN_RATE
     const base = suma(clave);
     return base > 0 ? clave.map((v) => (-monto * v) / base) : clave.map(() => 0);
   };
-  const ingSinCopecB = repartir(ingSinCopecTotal, ING_B, ING_C, "batuco");
-  const ingSinCopecC = repartir(ingSinCopecTotal, ING_B, ING_C, "colina");
+  const ingSinCopecB = macrolotes ? mB.ing : repartir(ingSinCopecTotal, ING_B, ING_C, "batuco");
+  const ingSinCopecC = macrolotes ? mC.ing : repartir(ingSinCopecTotal, ING_B, ING_C, "colina");
   const tierraDevB = devengo((TIERRA_AUDP * haB) / (haB + haC), ingSinCopecB);
   const tierraDevC = devengo((TIERRA_AUDP * haC) / (haB + haC), ingSinCopecC);
   const tierraDev =
@@ -343,8 +405,22 @@ export function computeConsolidado(audp: Audp = "ambos", tasa: number = VAN_RATE
     id: "tierra",
     nombre: ALCANCE_LABEL[alcance],
     ingresos: [
-      { label: "Ingresos Venta de Tierra", arr: ingSinCopec, total: suma(ingSinCopec) },
-      { label: "Venta terreno COPEC", arr: copec, total: suma(copec) },
+      ...(macrolotes
+        ? [
+            {
+              label: "Ingresos Venta de Tierra (macrolotes)",
+              arr: ingSinCopec,
+              total: suma(ingSinCopec),
+              detalle: [
+                { label: `Casas y townhouses · ${MACRO_PRECIO.C.toLocaleString("es-CL")} UF/m²`, arr: elegir(mB.casas, mC.casas), total: suma(elegir(mB.casas, mC.casas)) },
+                { label: `Edificios · ${MACRO_PRECIO.E.toLocaleString("es-CL")} UF/m²`, arr: elegir(mB.edif, mC.edif), total: suma(elegir(mB.edif, mC.edif)) },
+              ],
+            },
+          ]
+        : [
+            { label: "Ingresos Venta de Tierra", arr: ingSinCopec, total: suma(ingSinCopec) },
+            { label: "Venta terreno COPEC", arr: copec, total: suma(copec) },
+          ]),
       ...(completo
         ? [
             { label: "Ingresos Operacionales Sanitarios", arr: sIngOp, total: suma(sIngOp) },
@@ -353,11 +429,15 @@ export function computeConsolidado(audp: Audp = "ambos", tasa: number = VAN_RATE
         : []),
     ],
     costos: [
-      { label: "Costos Infraestructura", arr: infra, total: suma(infra) },
+      ...(macrolotes ? [] : [{ label: "Costos Infraestructura", arr: infra, total: suma(infra) }]),
       { label: "Costos Mitigaciones", arr: mitig, total: suma(mitig) },
       { label: "Comercialización (2%)", arr: comercializacion, total: suma(comercializacion) },
-      { label: "Mantención y seguridad", arr: mant, total: suma(mant) },
-      { label: "Equipamiento comercial (neto)", arr: equip, total: suma(equip) },
+      ...(macrolotes
+        ? []
+        : [
+            { label: "Mantención y seguridad", arr: mant, total: suma(mant) },
+            { label: "Equipamiento comercial (neto)", arr: equip, total: suma(equip) },
+          ]),
       {
         label: completo ? "Inversiones Sanitarias" : "Inversiones Sanitarias (asumidas)",
         arr: sanInv,
@@ -398,7 +478,9 @@ export function computeConsolidado(audp: Audp = "ambos", tasa: number = VAN_RATE
   };
 
   // ── venta física, con la curva de venta de suelo de esta vista ──
-  const fisico = fisicoDe(ingSinCopec, HA_TOTAL_DE[audp], VIV_TOTAL_DE[audp]);
+  const fisico = macrolotes
+    ? fisicoMacro(elegir(mB.ha, mC.ha), elegir(mB.viv, mC.viv))
+    : fisicoDe(ingSinCopec, HA_TOTAL_DE[audp], VIV_TOTAL_DE[audp]);
 
   return { inmobiliario: tierra, fisico };
 }

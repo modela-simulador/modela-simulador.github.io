@@ -6,6 +6,9 @@ import { descargarConsolidado } from "@/lib/consolidado-export";
 import {
   ALCANCE_LABEL,
   AUDP_LABEL,
+  MACRO_AUDP,
+  MACRO_INICIO,
+  MACRO_PRECIO,
   computeConsolidado,
   PARIDAD_PLANILLAS,
   TIERRA_AUDP,
@@ -31,9 +34,10 @@ export default function ConsolidadoPage() {
   const [audp, setAudp] = useState<Audp>("ambos");
   const [tasa, setTasa] = useState<number>(VAN_RATE);
   const [alcance, setAlcance] = useState<Alcance>("inmobiliario");
+  const [macrolotes, setMacrolotes] = useState(false);
   const { inmobiliario, fisico } = useMemo(
-    () => computeConsolidado(audp, tasa, alcance),
-    [audp, tasa, alcance],
+    () => computeConsolidado(audp, tasa, alcance, macrolotes),
+    [audp, tasa, alcance, macrolotes],
   );
   const [bajando, setBajando] = useState(false);
   const exportar = async () => {
@@ -56,10 +60,20 @@ export default function ConsolidadoPage() {
         <div className="min-w-0 shrink">
           <h1 className="text-base font-bold leading-tight">Consolidado — {ALCANCE_LABEL[alcance]}</h1>
           <p className="text-[11px] text-zinc-500 truncate">
-            {ALCANCE_LABEL[alcance]} · {AUDP_LABEL[audp]} · UF · {YEARS[0]} – {YEARS[YEARS.length - 1]}
+            {ALCANCE_LABEL[alcance]}{macrolotes ? " · Macrolotes" : ""} · {AUDP_LABEL[audp]} · UF · {YEARS[0]} – {YEARS[YEARS.length - 1]}
           </p>
         </div>
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          <button
+            onClick={() => setMacrolotes((m) => !m)}
+            aria-pressed={macrolotes}
+            title="Vender la superficie bruta en macrolotes de 5 a 7 ha, uno por año en cada AUDP; el desarrollador urbaniza"
+            className={`px-2.5 py-1 rounded-md text-[11px] font-medium border transition-colors ${
+              macrolotes ? "bg-amber-300 text-zinc-900 border-amber-300" : "border-zinc-700 text-zinc-400 hover:text-white"
+            }`}
+          >
+            Macrolotes
+          </button>
           <div className="flex items-center rounded-md border border-zinc-700 overflow-hidden">
             {(["inmobiliario", "completo"] as const).map((k) => (
               <button
@@ -126,11 +140,12 @@ export default function ConsolidadoPage() {
         {/* ── indicadores por unidad ── */}
         <UnidadCard u={inmobiliario} destacada />
 
-        <Fisico f={fisico} u={inmobiliario} audp={audp} />
+        <Fisico f={fisico} u={inmobiliario} audp={audp} macrolotes={macrolotes} />
         <FlujoChart u={inmobiliario} />
         <FlujoTable unidades={[inmobiliario]} fisico={fisico} />
+        {macrolotes && <CriteriosMacro />}
         <Criterios />
-        {audp === "ambos" ? (
+        {macrolotes ? null : audp === "ambos" ? (
           <Paridad tierra={inmobiliario} />
         ) : (
           <p className="text-[11px] text-zinc-500 px-1">
@@ -188,7 +203,7 @@ function Kpi({ label, value, color }: { label: string; value: string; color: str
 }
 
 // ── superficie y viviendas vendidas ──────────────────────────
-function Fisico({ f, u, audp }: { f: Fisico; u: Unidad; audp: Audp }) {
+function Fisico({ f, u, audp, macrolotes }: { f: Fisico; u: Unidad; audp: Audp; macrolotes: boolean }) {
   // siempre sobre el ingreso de SUELO: en el proyecto completo el total
   // arrastra la operación sanitaria y el UF/ha dejaría de significar nada
   const ingSuelo = u.ingresos
@@ -197,8 +212,8 @@ function Fisico({ f, u, audp }: { f: Fisico; u: Unidad; audp: Audp }) {
   const ufPorHa = f.haTot > 0 ? ingSuelo / f.haTot : 0;
   const ufPorViv = f.vivTot > 0 ? ingSuelo / f.vivTot : 0;
   const datos: Array<[string, string, string]> = [
-    ["Hectáreas vendidas", ha(f.haTot), AUDP_LABEL[audp]],
-    ["Viviendas vendidas", un(f.vivTot), "con el lote urbanizado"],
+    ["Hectáreas vendidas", ha(f.haTot), macrolotes ? `${AUDP_LABEL[audp]} · brutas` : AUDP_LABEL[audp]],
+    ["Viviendas vendidas", un(f.vivTot), macrolotes ? "las construye el desarrollador" : "con el lote urbanizado"],
     ["UF por hectárea", nf(ufPorHa), "ingreso medio del suelo"],
     ["UF por vivienda", nf(ufPorViv), "ingreso medio por unidad"],
   ];
@@ -456,6 +471,33 @@ function FlujoTable({ unidades, fisico }: { unidades: Unidad[]; fisico: Fisico }
 }
 
 // ── criterios ────────────────────────────────────────────────
+function CriteriosMacro() {
+  const b = MACRO_AUDP.batuco, c = MACRO_AUDP.colina;
+  return (
+    <div className="bg-amber-950/20 border border-amber-800/50 rounded-lg p-3.5 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-[11px] text-zinc-400 leading-relaxed">
+      <p>
+        <span className="text-amber-300 font-semibold">Macrolotes:</span> se vende la superficie bruta, uno por año en
+        cada AUDP desde {MACRO_INICIO}. Batuco {ha(b.ha)} ha en {b.orden.length} macrolotes de {ha(b.ha / b.orden.length)} ha;
+        Colina {ha(c.ha)} ha en {c.orden.length} de {ha(c.ha / c.orden.length)} ha. Se alternan, partiendo por edificios.
+      </p>
+      <p>
+        <span className="text-amber-300 font-semibold">Precios:</span> casas y townhouses{" "}
+        {MACRO_PRECIO.C.toLocaleString("es-CL")} UF/m² (rango 0,75–1) y edificios {MACRO_PRECIO.E.toLocaleString("es-CL")}{" "}
+        UF/m² (rango 2–3, de 4,5–6 UF/m² como lote individual). Batuco 2 macrolotes de casas y 3 de edificios; Colina 3 y 4.
+      </p>
+      <p>
+        <span className="text-amber-300 font-semibold">Fuera del flujo:</span> infraestructura, mantención y seguridad,
+        terreno COPEC y equipamiento comercial — la urbanización la asume el desarrollador.
+      </p>
+      <p>
+        <span className="text-amber-300 font-semibold">Siguen a cargo del dueño:</span> factibilización por gastar,
+        mitigaciones e inversiones sanitarias, con su calendario original hasta 2041, y la tierra devengada contra la venta
+        de cada AUDP.
+      </p>
+    </div>
+  );
+}
+
 function Criterios() {
   return (
     <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg p-3.5 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-[11px] text-zinc-500 leading-relaxed">
